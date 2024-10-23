@@ -1,3 +1,4 @@
+use futures::TryStreamExt;
 use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
 use tokio;
@@ -14,7 +15,10 @@ async fn main() -> mongodb::error::Result<()> {
     let messages: Collection<Message> = client.database("eteedir").collection("messages");
 
     if input.is_empty() {
-        println!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA OH NO ERROR ERROR ERROR YOU HAVE ERROR.")
+        let mut cursor = messages.find(None, None).await?;
+        while let Some(doc) = cursor.try_next().await? {
+            println!("{}", doc.content);
+        }
     } else {
         println!("{}", input);
 
