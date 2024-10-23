@@ -16,7 +16,7 @@ async fn main() -> mongodb::error::Result<()> {
     let server = TcpListener::bind("127.0.0.1:9001").unwrap();
 
     for stream in server.incoming() {
-        spawn(move || {
+        tokio::spawn(async move {
             let mut socket = accept(stream.unwrap()).unwrap();
 
             loop {
@@ -25,7 +25,8 @@ async fn main() -> mongodb::error::Result<()> {
                 if message.is_text() {
                     let string_message = message.to_text().unwrap();
 
-                    print!("{}", string_message);
+                    insert_message(string_message.to_string()).await;
+                    println!("{}", string_message);
                 }
             }
         });
@@ -58,6 +59,17 @@ async fn read_database() -> mongodb::error::Result<()> {
     let database = client.database("eteedir");
 
     let messages: Collection<Message> = database.collection("messages");
+
+    Ok(())
+}
+
+async fn insert_message(message: String) -> mongodb::error::Result<()> {
+    let client = Client::with_uri_str("mongodb://localhost").await?;
+    let messages = client.database("eteedir").collection("messages");
+
+    messages
+        .insert_one(doc! { "content": message }, None)
+        .await?;
 
     Ok(())
 }
