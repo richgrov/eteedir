@@ -1,10 +1,12 @@
-fn main() {
-    let options = ewebsock::Options::default();
-    // see documentation for more options
-    let (mut sender, receiver) = ewebsock::connect("ws://wss.postman-echo.com/raw", options).unwrap();
-    sender.send(ewebsock::WsMessage::Text("Hello!".into()));
-    while let Some(event) = receiver.try_recv() {
-        println!("Received {:?}", event);
-    }
-    println!("Shutting down...");
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::connect_async;
+
+#[tokio::main]
+async fn main() {
+    let (mut socket, _) = connect_async("wss://ws.postman-echo.com/raw")
+        .await
+        .expect("can't connect");
+    socket.send("hi".into()).await.unwrap();
+    let response = socket.next().await.unwrap().unwrap();
+    println!("{}", response);
 }
