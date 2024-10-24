@@ -18,11 +18,6 @@ async fn main() -> mongodb::error::Result<()> {
     for stream in server.incoming() {
         tokio::spawn(async move {
             let mut socket = accept(stream.unwrap()).unwrap();
-            let history = read_database().await.unwrap();
-
-            for item in history {
-                socket.write(tungstenite::Message::Text(item));
-            }
 
             loop {
                 let message = socket.read().unwrap();
@@ -59,19 +54,15 @@ async fn main() -> mongodb::error::Result<()> {
     Ok(())
 }
 
-async fn read_database() -> mongodb::error::Result<Vec<String>> {
+async fn read_database() -> mongodb::error::Result<()> {
     let client = Client::with_uri_str("mongodb://localhost").await?;
     let database = client.database("eteedir");
 
     let messages: Collection<Message> = database.collection("messages");
-    let mut cursor = messages.find(None, None).await?;
-    let mut vector = Vec::new();
 
-    while let Some(document) = cursor.try_next().await? {
-        vector.push(document.content);
-    }
+    let t = messages.find(None, None).await?;
 
-    Ok(vector)
+    Ok(())
 }
 
 async fn insert_message(message: String) -> mongodb::error::Result<()> {
