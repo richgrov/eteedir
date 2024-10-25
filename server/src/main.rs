@@ -72,7 +72,7 @@ async fn main() {
 }
 
 async fn read_database() -> mongodb::error::Result<Vec<String>> {
-    let client = Client::with_uri_str("mongodb://localhost").await?;
+    let client = Client::with_uri_str("mongodb://mongo:27017").await?;
     let database = client.database("eteedir");
 
     let messages: Collection<Message> = database.collection("messages");
@@ -87,7 +87,7 @@ async fn read_database() -> mongodb::error::Result<Vec<String>> {
 }
 
 async fn insert_message(message: String) -> mongodb::error::Result<()> {
-    let client = Client::with_uri_str("mongodb://localhost").await?;
+    let client = Client::with_uri_str("mongodb://mongo:27017").await?;
     let database = client.database("eteedir");
     let messages = database.collection("messages");
 
