@@ -3,7 +3,6 @@ use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use tokio;
-use tokio::sync::broadcast;
 use tungstenite::accept;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -50,7 +49,7 @@ async fn main() {
         connection: TcpListener::bind(address).unwrap(),
     };
 
-    let _ = server.server_stream().await;
+    server.server_stream().await;
 
     /*
     let input = std::env::args().skip(1).collect::<Vec<String>>().join(" ");
