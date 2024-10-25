@@ -2,8 +2,8 @@ use futures::TryStreamExt;
 use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
-use std::thread::spawn;
 use tokio;
+use tokio::sync::broadcast;
 use tungstenite::accept;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -11,31 +11,46 @@ struct Message {
     content: String,
 }
 
-#[tokio::main]
-async fn main() -> mongodb::error::Result<()> {
-    let server = TcpListener::bind("127.0.0.1:9001").unwrap();
+struct Server {
+    connection: TcpListener,
+}
 
-    for stream in server.incoming() {
-        tokio::spawn(async move {
-            let mut socket = accept(stream.unwrap()).unwrap();
-            let history = read_database().await.unwrap();
+impl Server {
+    pub async fn server_stream(&self) {
+        for stream in self.connection.incoming() {
+            tokio::spawn(async move {
+                let mut socket = accept(stream.unwrap()).unwrap();
 
-            for item in history {
-                socket.write(tungstenite::Message::Text(item));
-            }
+                let history = read_database().await.unwrap();
 
-            loop {
-                let message = socket.read().unwrap();
-
-                if message.is_text() {
-                    let string_message = message.to_text().unwrap();
-
-                    insert_message(string_message.to_string()).await;
-                    println!("{}", string_message);
+                for item in history {
+                    println!("{}", item);
+                    let _ = socket.send(tungstenite::Message::Text(item));
                 }
-            }
-        });
+
+                loop {
+                    let message = socket.read().unwrap();
+
+                    if message.is_text() {
+                        let string_message = message.to_text().unwrap().to_string();
+
+                        let _ = insert_message(string_message.to_string()).await;
+                        let _ = socket.send(tungstenite::Message::Text(string_message));
+                    }
+                }
+            });
+        }
     }
+}
+
+#[tokio::main]
+async fn main() {
+    let address = "127.0.0.1:9001";
+    let server = Server {
+        connection: TcpListener::bind(address).unwrap(),
+    };
+
+    let _ = server.server_stream().await;
 
     /*
     let input = std::env::args().skip(1).collect::<Vec<String>>().join(" ");
@@ -55,8 +70,6 @@ async fn main() -> mongodb::error::Result<()> {
             .await?;
     };
     */
-
-    Ok(())
 }
 
 async fn read_database() -> mongodb::error::Result<Vec<String>> {
@@ -76,7 +89,8 @@ async fn read_database() -> mongodb::error::Result<Vec<String>> {
 
 async fn insert_message(message: String) -> mongodb::error::Result<()> {
     let client = Client::with_uri_str("mongodb://localhost").await?;
-    let messages = client.database("eteedir").collection("messages");
+    let database = client.database("eteedir");
+    let messages = database.collection("messages");
 
     messages
         .insert_one(doc! { "content": message }, None)
