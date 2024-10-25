@@ -4,7 +4,7 @@ use std::io::{stdin,stdout,Write};
 
 #[tokio::main]
 async fn main() {
-    let (mut socket, _) = connect_async("wss://ws.postman-echo.com/raw")
+    let (mut socket, _) = connect_async("ws://localhost:80/")
         .await
         .expect("can't connect");
     socket.send("hi".into()).await.unwrap();
@@ -13,9 +13,11 @@ async fn main() {
     read_from_client().await;
 }
 
+async fn read_from_client() {
+    let (mut socket, _) = connect_async("ws://localhost:80/")
+        .await
+        .expect("can't connect");
 
-async fn read_from_client(){
-    let (mut socket, _) = connect_async("wss://ws.postman-echo.com/raw").await.expect("can't connect");
     let mut exit = false;
     print!("Do something \n");
     loop {
