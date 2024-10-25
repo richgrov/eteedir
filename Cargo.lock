@@ -1330,6 +1330,7 @@ dependencies = [
  "mongodb",
  "serde",
  "tokio",
+ "tungstenite",
 ]
 
 [[package]]
