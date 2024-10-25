@@ -45,7 +45,7 @@ impl Server {
 
 #[tokio::main]
 async fn main() {
-    let address = "127.0.0.1:9001";
+    let address = "0.0.0.0:8080";
     let server = Server {
         connection: TcpListener::bind(address).unwrap(),
     };
