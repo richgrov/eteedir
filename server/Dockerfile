@@ -5,5 +5,5 @@ RUN cargo build --release
 
 FROM debian:bullseye-slim
 COPY --from=builder /app/target/release/server /usr/local/bin/
-EXPOSE 80
+EXPOSE 8080
 CMD ["server"]
