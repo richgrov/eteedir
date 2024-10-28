@@ -1,26 +1,23 @@
-use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::connect_async;
-use std::io::{stdin,stdout,Write};
+use std::io::{stdin, stdout, Write};
+use tokio::net::TcpStream;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 #[tokio::main]
 async fn main() {
-    let (mut socket, _) = connect_async("wss://ws.postman-echo.com/raw")
+    let (socket, _) = connect_async("ws://localhost:80/")
         .await
         .expect("can't connect");
-    socket.send("hi".into()).await.unwrap();
-    let response = socket.next().await.unwrap().unwrap();
-    println!("{}", response);
-    read_from_client().await;
+
+    read_from_client(socket).await;
 }
 
-
-async fn read_from_client(){
-    let (mut socket, _) = connect_async("wss://ws.postman-echo.com/raw").await.expect("can't connect");
-    let mut exit = false;
+async fn read_from_client(socket: WebSocketStream<MaybeTlsStream<TcpStream>>) {
     print!("Do something \n");
     loop {
         let mut message = String::new();
-        stdin().read_line(&mut message).expect("Did not enter blah blah blah");
+        stdin()
+            .read_line(&mut message)
+            .expect("Did not enter blah blah blah");
         let _ = stdout().flush();
         if let Some('\n') = message.chars().next_back() {
             message.pop();
@@ -29,7 +26,7 @@ async fn read_from_client(){
             message.pop();
         }
 
-        if message.eq("exit"){
+        if message.eq("exit") {
             break;
         }
 

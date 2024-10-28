@@ -3,7 +3,6 @@ use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
 use std::net::TcpListener;
 use tokio;
-use tokio::sync::broadcast;
 use tungstenite::accept;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -45,12 +44,12 @@ impl Server {
 
 #[tokio::main]
 async fn main() {
-    let address = "127.0.0.1:9001";
+    let address = "0.0.0.0:8080";
     let server = Server {
         connection: TcpListener::bind(address).unwrap(),
     };
 
-    let _ = server.server_stream().await;
+    server.server_stream().await;
 
     /*
     let input = std::env::args().skip(1).collect::<Vec<String>>().join(" ");
@@ -73,7 +72,7 @@ async fn main() {
 }
 
 async fn read_database() -> mongodb::error::Result<Vec<String>> {
-    let client = Client::with_uri_str("mongodb://localhost").await?;
+    let client = Client::with_uri_str("mongodb://mongo:27017").await?;
     let database = client.database("eteedir");
 
     let messages: Collection<Message> = database.collection("messages");
@@ -88,7 +87,7 @@ async fn read_database() -> mongodb::error::Result<Vec<String>> {
 }
 
 async fn insert_message(message: String) -> mongodb::error::Result<()> {
-    let client = Client::with_uri_str("mongodb://localhost").await?;
+    let client = Client::with_uri_str("mongodb://mongo:27017").await?;
     let database = client.database("eteedir");
     let messages = database.collection("messages");
 
