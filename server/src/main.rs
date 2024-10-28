@@ -1,30 +1,46 @@
 use futures::TryStreamExt;
 use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
-use std::net::TcpListener;
+use std::sync::Arc;
+use std::sync::RwLock;
 use tokio;
-use tungstenite::accept;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
+use tokio_tungstenite::accept_async;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Message {
     content: String,
 }
 
+struct Connection {
+    stream: TcpStream,
+}
+
 struct Server {
+    vector: Vec<Arc<RwLock<Connection>>>,
     connection: TcpListener,
 }
 
 impl Server {
-    pub async fn server_stream(&self) {
-        for stream in self.connection.incoming() {
+    pub async fn server_stream(&mut self) {
+        loop {
+            let (stream, address) = self.connection.accept().await.unwrap();
+
+            let connection = Arc::new(RwLock::new(Connection { stream: stream }));
+
+            self.vector.push(connection.clone());
+
             tokio::spawn(async move {
-                let mut socket = accept(stream.unwrap()).unwrap();
+                let mut socket = accept_async(connection.get_mut().unwrap().stream)
+                    .await
+                    .unwrap();
 
                 let history = read_database().await.unwrap();
 
                 for item in history {
                     println!("{}", item);
-                    let _ = socket.send(tungstenite::Message::Text(item));
+                    socket.write(tungstenite::Message::Text(item)).unwrap();
                 }
 
                 loop {
@@ -33,8 +49,10 @@ impl Server {
                     if message.is_text() {
                         let string_message = message.to_text().unwrap().to_string();
 
-                        let _ = insert_message(string_message.to_string()).await;
-                        let _ = socket.send(tungstenite::Message::Text(string_message));
+                        insert_message(string_message.to_string()).await.unwrap();
+                        socket
+                            .send(tungstenite::Message::Text(string_message))
+                            .unwrap();
                     }
                 }
             });
@@ -45,8 +63,9 @@ impl Server {
 #[tokio::main]
 async fn main() {
     let address = "0.0.0.0:8080";
-    let server = Server {
-        connection: TcpListener::bind(address).unwrap(),
+    let mut server = Server {
+        vector: Vec::new(),
+        connection: TcpListener::bind(address).await.unwrap(),
     };
 
     server.server_stream().await;
@@ -69,6 +88,7 @@ async fn main() {
             .await?;
     };
     */
+    Ok(())
 }
 
 async fn read_database() -> mongodb::error::Result<Vec<String>> {
