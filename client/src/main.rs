@@ -1,7 +1,9 @@
-use std::io::{stdin, stdout, Write};
-use futures_util::SinkExt;
+use std::io::{stdin, stdout, Error, Split, Write};
+use futures_util::{SinkExt, StreamExt};
+use futures_util::stream::{SplitSink, SplitStream};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::main]
 async fn main() {
@@ -9,10 +11,12 @@ async fn main() {
         .await
         .expect("can't connect");
 
-    read_from_client(socket).await;
+    let (write, read) = socket.split();
+    tokio::spawn(write_to_server(write));
+    receive_from_server(read).await.unwrap();
 }
 
-async fn read_from_client(mut socket: WebSocketStream<MaybeTlsStream<TcpStream>>) {
+async fn write_to_server(mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>) {
     print!("Do something \n");
     loop {
         let mut message = String::new();
@@ -31,6 +35,21 @@ async fn read_from_client(mut socket: WebSocketStream<MaybeTlsStream<TcpStream>>
             break;
         }
 
-        socket.send(message.into()).await.unwrap();
+        write.send(message.into()).await.unwrap();
     }
+}
+
+async fn receive_from_server(mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>) -> Result<(), Error> {
+    while let Some(msg) = read.next().await {
+        match msg {
+            Ok(Message::Text(text)) => println!("Received: {}", text),
+            Ok(Message::Binary(bin)) => println!("Received binary data: {:?}", bin),
+            Err(e) => {
+                eprintln!("Error receiving message: {}", e);
+                break;
+            },
+            _ => panic!()
+        }
+    }
+    Ok(())
 }
