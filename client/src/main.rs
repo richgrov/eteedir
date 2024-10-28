@@ -1,4 +1,5 @@
 use std::io::{stdin, stdout, Write};
+use futures_util::SinkExt;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
@@ -11,7 +12,7 @@ async fn main() {
     read_from_client(socket).await;
 }
 
-async fn read_from_client(socket: WebSocketStream<MaybeTlsStream<TcpStream>>) {
+async fn read_from_client(mut socket: WebSocketStream<MaybeTlsStream<TcpStream>>) {
     print!("Do something \n");
     loop {
         let mut message = String::new();
