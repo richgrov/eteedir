@@ -13,13 +13,13 @@ struct Message {
     content: String,
 }
 
-struct Connection {
-    stream: TcpStream,
-}
-
 struct Server {
     vector: Vec<Arc<RwLock<Connection>>>,
     connection: TcpListener,
+}
+
+struct Connection {
+    stream: TcpStream,
 }
 
 impl Server {
