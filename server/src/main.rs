@@ -28,17 +28,14 @@ struct Connection {
 impl Server {
     pub async fn server_stream(&mut self) {
         loop {
-            let (stream, address) = self.connection.accept().await.unwrap();
-            let connection = Arc::new(RwLock::new(Connection { stream: stream }));
+            let (stream, _) = self.connection.accept().await.unwrap();
+            let connection = Arc::new(RwLock::new(Connection { stream }));
 
             self.vector.push(connection.clone());
 
             tokio::spawn(async move {
                 let mut rustisannoying = connection.write().await;
                 let mut socket = accept_async(&mut rustisannoying.stream).await.unwrap();
-
-                //let read_something = socket.next().await.unwrap();
-                //let write_something = socket.send(Message::Text("adkfjhg".to_string()));
 
                 let history = read_database().await.unwrap();
 
