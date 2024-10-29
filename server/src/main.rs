@@ -4,10 +4,10 @@ use futures_util::StreamExt;
 use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::sync::RwLock;
 use tokio;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
+use tokio::sync::RwLock;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -34,9 +34,8 @@ impl Server {
             self.vector.push(connection.clone());
 
             tokio::spawn(async move {
-                let mut socket = accept_async(connection.get_mut().unwrap().stream)
-                    .await
-                    .unwrap();
+                let mut rustisannoying = connection.write().await;
+                let mut socket = accept_async(&mut rustisannoying.stream).await.unwrap();
 
                 //let read_something = socket.next().await.unwrap();
                 //let write_something = socket.send(Message::Text("adkfjhg".to_string()));
@@ -45,7 +44,7 @@ impl Server {
 
                 for item in history {
                     println!("{}", item);
-                    socket.send(Message::Text(item));
+                    socket.send(Message::Text(item)).await.unwrap();
                 }
 
                 loop {
@@ -55,7 +54,7 @@ impl Server {
                         let string_message = message.to_text().unwrap().to_string();
 
                         insert_message(string_message.to_string()).await.unwrap();
-                        socket.send(Message::Text(string_message));
+                        socket.send(Message::Text(string_message)).await.unwrap();
                     }
                 }
             });
