@@ -1,4 +1,6 @@
 use futures::TryStreamExt;
+use futures_util::SinkExt;
+use futures_util::StreamExt;
 use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -7,9 +9,10 @@ use tokio;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Message {
+struct Content {
     content: String,
 }
 
@@ -35,23 +38,24 @@ impl Server {
                     .await
                     .unwrap();
 
+                //let read_something = socket.next().await.unwrap();
+                //let write_something = socket.send(Message::Text("adkfjhg".to_string()));
+
                 let history = read_database().await.unwrap();
 
                 for item in history {
                     println!("{}", item);
-                    socket.write(tungstenite::Message::Text(item)).unwrap();
+                    socket.send(Message::Text(item));
                 }
 
                 loop {
-                    let message = socket.read().unwrap();
+                    let message = socket.next().await.unwrap().unwrap();
 
                     if message.is_text() {
                         let string_message = message.to_text().unwrap().to_string();
 
                         insert_message(string_message.to_string()).await.unwrap();
-                        socket
-                            .send(tungstenite::Message::Text(string_message))
-                            .unwrap();
+                        socket.send(Message::Text(string_message));
                     }
                 }
             });
@@ -74,7 +78,7 @@ async fn read_database() -> mongodb::error::Result<Vec<String>> {
     let client = Client::with_uri_str("mongodb://mongo:27017").await?;
     let database = client.database("eteedir");
 
-    let messages: Collection<Message> = database.collection("messages");
+    let messages: Collection<Content> = database.collection("messages");
     let mut cursor = messages.find(None, None).await?;
     let mut vector = Vec::new();
 
