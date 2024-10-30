@@ -3,6 +3,8 @@ use futures_util::SinkExt;
 use futures_util::StreamExt;
 use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio;
 use tokio::net::TcpListener;
@@ -17,7 +19,7 @@ struct Content {
 }
 
 struct Server {
-    vector: Vec<Arc<RwLock<Connection>>>,
+    map: RwLock<HashMap<SocketAddr, Arc<RwLock<Connection>>>>,
     connection: TcpListener,
 }
 
@@ -26,12 +28,14 @@ struct Connection {
 }
 
 impl Server {
-    pub async fn server_stream(&mut self) {
+    pub async fn server_stream(self: Arc<Server>) {
         loop {
-            let (stream, _) = self.connection.accept().await.unwrap();
+            let (stream, address) = self.connection.accept().await.unwrap();
             let connection = Arc::new(RwLock::new(Connection { stream }));
 
-            self.vector.push(connection.clone());
+            self.map.write().await.insert(address, connection.clone());
+
+            let cloned_self = self.clone();
 
             tokio::spawn(async move {
                 let mut rustisannoying = connection.write().await;
@@ -45,7 +49,15 @@ impl Server {
                 }
 
                 loop {
-                    let message = socket.next().await.unwrap().unwrap();
+                    let probably_message = socket.next().await.unwrap();
+
+                    let message = match probably_message {
+                        Ok(m) => m,
+                        Err(e) => {
+                            cloned_self.map.write().await.remove(&address);
+                            break;
+                        }
+                    };
 
                     if message.is_text() {
                         let string_message = message.to_text().unwrap().to_string();
@@ -54,6 +66,8 @@ impl Server {
                         socket.send(Message::Text(string_message)).await.unwrap();
                     }
                 }
+
+                Result::<(), tokio_tungstenite::tungstenite::Error>::Ok(())
             });
         }
     }
@@ -62,10 +76,12 @@ impl Server {
 #[tokio::main]
 async fn main() {
     let address = "0.0.0.0:8080";
-    let mut server = Server {
-        vector: Vec::new(),
+    let server = Arc::new(Server {
+        map: RwLock::new(HashMap::new()),
         connection: TcpListener::bind(address).await.unwrap(),
-    };
+    });
+
+    println!("say something just so i know it works");
 
     server.server_stream().await;
 }
