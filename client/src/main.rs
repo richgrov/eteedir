@@ -7,7 +7,15 @@ use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::main]
 async fn main() {
-    let (socket, _) = connect_async("ws://localhost:80/")
+    let address = match std::env::args().nth(1) {
+        Some(a) => a,
+        None => {
+            eprintln!("error: specify a server address");
+            return;
+        }
+    };
+
+    let (socket, _) = connect_async(format!("ws://{}/", address))
         .await
         .expect("can't connect");
 
