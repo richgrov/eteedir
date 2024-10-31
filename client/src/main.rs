@@ -1,9 +1,11 @@
 use crossterm::event::KeyCode;
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
-use ratatui::{backend, text::Text, Frame};
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::{stdin, stdout, Error, Write};
+use futures_util::StreamExt;
+use ratatui::backend::CrosstermBackend;
+use ratatui::style::Stylize;
+use ratatui::widgets::Paragraph;
+use ratatui::{text::Text, Frame};
+use std::io::Error;
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
@@ -11,6 +13,7 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tui_textarea::TextArea;
 
 struct App {
+    terminal: ratatui::Terminal<CrosstermBackend<std::io::Stdout>>,
     keyboard_send: broadcast::Sender<crossterm::event::Event>,
     keyboard_recv: broadcast::Receiver<crossterm::event::Event>,
     message_send: mpsc::Sender<String>,
@@ -24,6 +27,7 @@ impl App {
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
 
         App {
+            terminal: ratatui::init(),
             keyboard_send,
             keyboard_recv,
             message_send,
@@ -36,8 +40,25 @@ impl App {
         if let crossterm::event::Event::Key(k) = event {
             if let KeyCode::Esc = k.code {
                 self.should_exit = true;
+                return;
             }
         }
+
+        self.draw();
+    }
+
+    pub fn draw(&mut self) {
+        self.terminal.draw(draw).expect("uh oh");
+        let rect = ratatui::layout::Rect::new(100, 100, 100, 100);
+
+        self.terminal
+            .draw(|frame| {
+                let greeting = Paragraph::new("Hello Ratatui! (press 'esc' to quit)")
+                    .white()
+                    .on_blue();
+                frame.render_widget(greeting, frame.area());
+            })
+            .unwrap();
     }
 }
 
@@ -51,8 +72,6 @@ async fn main() {
         }
     };
 
-    let mut terminal = ratatui::init();
-    let mut textarea = TextArea::default();
     let (socket, _) = connect_async(format!("ws://{}/", address))
         .await
         .expect("can't connect");
@@ -61,7 +80,10 @@ async fn main() {
     let mut app = App::new();
     tokio::spawn(write_to_server(write, app.keyboard_send.clone()));
     tokio::spawn(receive_from_server(reader, app.message_send.clone()));
-    terminal.clear().unwrap();
+
+    app.terminal.clear().unwrap();
+    app.draw();
+
     while !app.should_exit {
         tokio::select! {
             key = app.keyboard_recv.recv() => {
@@ -75,18 +97,13 @@ async fn main() {
             },
             msg_recv = app.message_recv.recv() => {
                 if let Some(m) = msg_recv {
-                    println!("Received: {}", m);
+                    //println!("Received: {}", m);
                 }
             }
         }
-        terminal.draw(draw).expect("uh oh");
-        let rect = ratatui::layout::Rect::new(100, 100, 100, 100);
-
-        // terminal.draw(|f| {
-        //     f.render_widget(&textarea, rect);
-        // });
     }
     ratatui::restore();
+    panic!();
 }
 
 fn draw(frame: &mut Frame) {
