@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
-use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{accept_async, WebSocketStream};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Content {
@@ -22,32 +22,41 @@ struct Server {
 }
 
 struct Connection {
-    stream: TcpStream,
+    socket: WebSocketStream<TcpStream>,
 }
 
 impl Server {
     pub async fn server_stream(self: Arc<Server>) {
         loop {
             let (stream, address) = self.connection.accept().await.unwrap();
-            let connection = Arc::new(RwLock::new(Connection { stream }));
-
-            self.map.write().await.insert(address, connection.clone());
 
             let cloned_self = self.clone();
 
             tokio::spawn(async move {
-                let mut writable_connection = connection.write().await;
-                let mut socket = accept_async(&mut writable_connection.stream).await.unwrap();
+                let socket = accept_async(stream).await.unwrap();
+                let connection = Arc::new(RwLock::new(Connection { socket }));
+
+                cloned_self
+                    .map
+                    .write()
+                    .await
+                    .insert(address, connection.clone());
 
                 let history = read_database().await.unwrap();
 
                 for item in history {
                     println!("{}", item);
-                    socket.send(Message::Text(item)).await.unwrap();
+                    connection
+                        .write()
+                        .await
+                        .socket
+                        .send(Message::Text(item))
+                        .await
+                        .unwrap();
                 }
 
                 loop {
-                    let probably_message = socket.next().await.unwrap();
+                    let probably_message = connection.write().await.socket.next().await.unwrap();
 
                     let message = match probably_message {
                         Ok(m) => m,
@@ -61,13 +70,14 @@ impl Server {
                         let string_message = message.to_text().unwrap().to_string();
 
                         insert_message(string_message.to_string()).await.unwrap();
-                        socket.send(Message::Text(string_message)).await.unwrap();
 
                         for each in cloned_self.map.read().await.values() {
                             each.write()
-                                .awaitString
-                                .stream
-                                .send(Message::Text("asdfg".to_string()));
+                                .await
+                                .socket
+                                .send(Message::Text(string_message.clone()))
+                                .await
+                                .unwrap();
                         }
                     }
                 }
