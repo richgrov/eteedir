@@ -1,9 +1,13 @@
-use std::io::{stdin, stdout, Error, Write};
-use futures_util::{SinkExt, StreamExt};
+use crossterm::event::{self, read, Event, KeyCode};
 use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
+use ratatui::{backend, text::Text, Frame};
+use ratatui::{backend::CrosstermBackend, Terminal};
+use std::io::{stdin, stdout, Error, Write};
 use tokio::net::TcpStream;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tui_textarea::TextArea;
 
 #[tokio::main]
 async fn main() {
@@ -15,15 +19,20 @@ async fn main() {
         }
     };
 
+    let mut terminal = ratatui::init();
+    let mut textarea = TextArea::default();
     let (socket, _) = connect_async(format!("ws://{}/", address))
         .await
         .expect("can't connect");
 
-    let (write_to_server_channel, mut write_to_server_broadcast) = tokio::sync::broadcast::channel(16);
-    let (receive_from_server_channel, mut incoming_from_server_channel) = tokio::sync::mpsc::channel(16);
-    let (write, read) = socket.split();
+    let (write_to_server_channel, mut write_to_server_broadcast) =
+        tokio::sync::broadcast::channel(16);
+    let (receive_from_server_channel, mut incoming_from_server_channel) =
+        tokio::sync::mpsc::channel(16);
+    let (write, reader) = socket.split();
     tokio::spawn(write_to_server(write, write_to_server_channel));
-    tokio::spawn(receive_from_server(read, receive_from_server_channel));
+    tokio::spawn(receive_from_server(reader, receive_from_server_channel));
+    terminal.clear();
     loop {
         tokio::select! {
             exit_broadcast = write_to_server_broadcast.recv() => {
@@ -35,10 +44,31 @@ async fn main() {
                 }
             }
         }
+        terminal.draw(draw).expect("uh oh");
+        let rect = ratatui::layout::Rect::new(100, 100, 100, 100);
+
+        // terminal.draw(|f| {
+        //     f.render_widget(&textarea, rect);
+        // });
+        // if let Event::Key(key) = read().expect("kjsahfkjsahfkjadsf") {
+        //     if key.code == KeyCode::Esc {
+        //         break;
+        //     }
+        //     textarea.input(key);
+        // }
     }
+    ratatui::restore();
 }
 
-async fn write_to_server(mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>, sending_channel: tokio::sync::broadcast::Sender<()>) {
+fn draw(frame: &mut Frame) {
+    let test = Text::raw("hello");
+    frame.render_widget(test, frame.area());
+}
+
+async fn write_to_server(
+    mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    sending_channel: tokio::sync::broadcast::Sender<()>,
+) {
     loop {
         let mut message = String::new();
 
@@ -57,7 +87,9 @@ async fn write_to_server(mut write: SplitSink<WebSocketStream<MaybeTlsStream<Tcp
         }
 
         if message.to_lowercase().eq("exit") {
-            sending_channel.send(()).expect("Couldn't exit successfully");
+            sending_channel
+                .send(())
+                .expect("Couldn't exit successfully");
             break;
         }
 
@@ -65,19 +97,25 @@ async fn write_to_server(mut write: SplitSink<WebSocketStream<MaybeTlsStream<Tcp
     }
 }
 
-async fn receive_from_server(mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>, sending_channel: tokio::sync::mpsc::Sender<String>) -> Result<(), Error> {
+async fn receive_from_server(
+    mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    sending_channel: tokio::sync::mpsc::Sender<String>,
+) -> Result<(), Error> {
     while let Some(msg) = read.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                sending_channel.send(text).await.expect("Couldn't receive message from server.");
-            },
+                sending_channel
+                    .send(text)
+                    .await
+                    .expect("Couldn't receive message from server.");
+            }
             Ok(Message::Binary(bin)) => println!("Received binary data: {:?}", bin),
             Err(e) => {
                 eprintln!("Error receiving message: {}", e);
                 break;
             }
-            _ => panic!()
+            _ => panic!(),
         }
-    };
+    }
     Ok(())
 }
