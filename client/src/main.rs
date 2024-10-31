@@ -15,6 +15,7 @@ struct App {
     keyboard_recv: broadcast::Receiver<crossterm::event::Event>,
     message_send: mpsc::Sender<String>,
     message_recv: mpsc::Receiver<String>,
+    should_exit: bool,
 }
 
 impl App {
@@ -27,6 +28,15 @@ impl App {
             keyboard_recv,
             message_send,
             message_recv,
+            should_exit: false,
+        }
+    }
+
+    pub fn on_key_press(&mut self, event: crossterm::event::Event) {
+        if let crossterm::event::Event::Key(k) = event {
+            if let KeyCode::Esc = k.code {
+                self.should_exit = true;
+            }
         }
     }
 }
@@ -49,18 +59,16 @@ async fn main() {
 
     let (write, reader) = socket.split();
     let mut app = App::new();
-    tokio::spawn(write_to_server(write, app.keyboard_send));
-    tokio::spawn(receive_from_server(reader, app.message_send));
+    tokio::spawn(write_to_server(write, app.keyboard_send.clone()));
+    tokio::spawn(receive_from_server(reader, app.message_send.clone()));
     terminal.clear().unwrap();
-    loop {
+    while !app.should_exit {
         tokio::select! {
             key = app.keyboard_recv.recv() => {
-                if key.is_err() {
-                    break;
-                }
-
-                if let crossterm::event::Event::Key(k) = key.unwrap() {
-                    if let KeyCode::Esc = k.code {
+                match key {
+                    Ok(k) => app.on_key_press(k),
+                    Err(e) => {
+                        eprintln!("uh oh! {}", e);
                         break;
                     }
                 }
