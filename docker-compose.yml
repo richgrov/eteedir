@@ -4,6 +4,7 @@ services:
     expose:
       - "27017:27017"
   server:
+    image: sandwich.azurecr.io/eteedir-server:latest
     build: ./server
     ports:
       - "80:8080"
