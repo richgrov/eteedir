@@ -1,42 +1,88 @@
 use futures::TryStreamExt;
+use futures_util::{SinkExt, StreamExt};
 use mongodb::{bson::doc, Client, Collection};
 use serde::{Deserialize, Serialize};
-use std::net::TcpListener;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio;
-use tungstenite::accept;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{accept_async, WebSocketStream};
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Message {
+struct Content {
     content: String,
 }
 
 struct Server {
+    map: RwLock<HashMap<SocketAddr, Arc<RwLock<Connection>>>>,
     connection: TcpListener,
 }
 
+struct Connection {
+    socket: WebSocketStream<TcpStream>,
+}
+
 impl Server {
-    pub async fn server_stream(&self) {
-        for stream in self.connection.incoming() {
+    pub async fn server_stream(self: Arc<Server>) {
+        loop {
+            let (stream, address) = self.connection.accept().await.unwrap();
+
+            let cloned_self = self.clone();
+
             tokio::spawn(async move {
-                let mut socket = accept(stream.unwrap()).unwrap();
+                let socket = accept_async(stream).await.unwrap();
+                let connection = Arc::new(RwLock::new(Connection { socket }));
+
+                cloned_self
+                    .map
+                    .write()
+                    .await
+                    .insert(address, connection.clone());
 
                 let history = read_database().await.unwrap();
 
                 for item in history {
                     println!("{}", item);
-                    let _ = socket.send(tungstenite::Message::Text(item));
+                    connection
+                        .write()
+                        .await
+                        .socket
+                        .send(Message::Text(item))
+                        .await
+                        .unwrap();
                 }
 
                 loop {
-                    let message = socket.read().unwrap();
+                    let probably_message = connection.write().await.socket.next().await.unwrap();
+
+                    let message = match probably_message {
+                        Ok(m) => m,
+                        Err(_) => {
+                            cloned_self.map.write().await.remove(&address);
+                            break;
+                        }
+                    };
 
                     if message.is_text() {
                         let string_message = message.to_text().unwrap().to_string();
 
-                        let _ = insert_message(string_message.to_string()).await;
-                        let _ = socket.send(tungstenite::Message::Text(string_message));
+                        insert_message(string_message.to_string()).await.unwrap();
+
+                        for each in cloned_self.map.read().await.values() {
+                            each.write()
+                                .await
+                                .socket
+                                .send(Message::Text(string_message.clone()))
+                                .await
+                                .unwrap();
+                        }
                     }
                 }
+
+                Result::<(), tokio_tungstenite::tungstenite::Error>::Ok(())
             });
         }
     }
@@ -44,38 +90,23 @@ impl Server {
 
 #[tokio::main]
 async fn main() {
-    let address = "0.0.0.0:8080";
-    let server = Server {
-        connection: TcpListener::bind(address).unwrap(),
-    };
+    let address = std::env::var("ADDRESS").unwrap_or("0.0.0.0:8080".to_string());
+    let server = Arc::new(Server {
+        map: RwLock::new(HashMap::new()),
+        connection: TcpListener::bind(address).await.unwrap(),
+    });
+
+    println!("say something just so i know it works");
 
     server.server_stream().await;
-
-    /*
-    let input = std::env::args().skip(1).collect::<Vec<String>>().join(" ");
-    let client: Client = Client::with_uri_str("mongodb://localhost").await?;
-    let messages: Collection<Message> = client.database("eteedir").collection("messages");
-
-    if input.is_empty() {
-        let mut cursor = messages.find(None, None).await?;
-        while let Some(doc) = cursor.try_next().await? {
-            println!("{}", doc.content);
-        }
-    } else {
-        println!("{}", input);
-
-        messages
-            .insert_one(Message { content: input }, None)
-            .await?;
-    };
-    */
 }
 
 async fn read_database() -> mongodb::error::Result<Vec<String>> {
-    let client = Client::with_uri_str("mongodb://mongo:27017").await?;
+    let address = std::env::var("MONGODB").unwrap_or("mongodb://mongo:27017".to_string());
+    let client = Client::with_uri_str(address).await?;
     let database = client.database("eteedir");
 
-    let messages: Collection<Message> = database.collection("messages");
+    let messages: Collection<Content> = database.collection("messages");
     let mut cursor = messages.find(None, None).await?;
     let mut vector = Vec::new();
 
@@ -87,7 +118,8 @@ async fn read_database() -> mongodb::error::Result<Vec<String>> {
 }
 
 async fn insert_message(message: String) -> mongodb::error::Result<()> {
-    let client = Client::with_uri_str("mongodb://mongo:27017").await?;
+    let address = std::env::var("MONGODB").unwrap_or("mongodb://mongo:27017".to_string());
+    let client = Client::with_uri_str(address).await?;
     let database = client.database("eteedir");
     let messages = database.collection("messages");
 

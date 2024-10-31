@@ -1327,10 +1327,11 @@ dependencies = [
  "bson",
  "chrono",
  "futures",
+ "futures-util",
  "mongodb",
  "serde",
  "tokio",
- "tungstenite",
+ "tokio-tungstenite",
 ]
 
 [[package]]
