@@ -1,4 +1,4 @@
-use crossterm::event::{self, read, Event, KeyCode};
+use crossterm::event::KeyCode;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use ratatui::{backend, text::Text, Frame};
@@ -11,8 +11,8 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tui_textarea::TextArea;
 
 struct App {
-    keyboard_send: broadcast::Sender<()>,
-    keyboard_recv: broadcast::Receiver<()>,
+    keyboard_send: broadcast::Sender<crossterm::event::Event>,
+    keyboard_recv: broadcast::Receiver<crossterm::event::Event>,
     message_send: mpsc::Sender<String>,
     message_recv: mpsc::Receiver<String>,
 }
@@ -51,10 +51,19 @@ async fn main() {
     let mut app = App::new();
     tokio::spawn(write_to_server(write, app.keyboard_send));
     tokio::spawn(receive_from_server(reader, app.message_send));
+    terminal.clear().unwrap();
     loop {
         tokio::select! {
-            exit_broadcast = app.keyboard_recv.recv() => {
-                break;
+            key = app.keyboard_recv.recv() => {
+                if key.is_err() {
+                    break;
+                }
+
+                if let crossterm::event::Event::Key(k) = key.unwrap() {
+                    if let KeyCode::Esc = k.code {
+                        break;
+                    }
+                }
             },
             msg_recv = app.message_recv.recv() => {
                 if let Some(m) = msg_recv {
@@ -68,12 +77,6 @@ async fn main() {
         // terminal.draw(|f| {
         //     f.render_widget(&textarea, rect);
         // });
-        // if let Event::Key(key) = read().expect("kjsahfkjsahfkjadsf") {
-        //     if key.code == KeyCode::Esc {
-        //         break;
-        //     }
-        //     textarea.input(key);
-        // }
     }
     ratatui::restore();
 }
@@ -85,33 +88,14 @@ fn draw(frame: &mut Frame) {
 
 async fn write_to_server(
     mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    sending_channel: tokio::sync::broadcast::Sender<()>,
+    sending_channel: tokio::sync::broadcast::Sender<crossterm::event::Event>,
 ) {
     loop {
-        let mut message = String::new();
+        let event = crossterm::event::read().expect("kjsahfkjsahfkjadsf");
 
-        stdin()
-            .read_line(&mut message)
-            .expect("Did not enter valid value");
-
-        let _ = stdout().flush();
-
-        if let Some('\n') = message.chars().next_back() {
-            message.pop();
-        }
-
-        if let Some('\r') = message.chars().next_back() {
-            message.pop();
-        }
-
-        if message.to_lowercase().eq("exit") {
-            sending_channel
-                .send(())
-                .expect("Couldn't exit successfully");
-            break;
-        }
-
-        write.send(message.into()).await.unwrap();
+        sending_channel
+            .send(event)
+            .expect("Couldn't exit successfully");
     }
 }
 
