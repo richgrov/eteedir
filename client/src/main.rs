@@ -5,9 +5,31 @@ use ratatui::{backend, text::Text, Frame};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{stdin, stdout, Error, Write};
 use tokio::net::TcpStream;
+use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tui_textarea::TextArea;
+
+struct App {
+    keyboard_send: broadcast::Sender<()>,
+    keyboard_recv: broadcast::Receiver<()>,
+    message_send: mpsc::Sender<String>,
+    message_recv: mpsc::Receiver<String>,
+}
+
+impl App {
+    pub fn new() -> App {
+        let (keyboard_send, keyboard_recv) = tokio::sync::broadcast::channel(16);
+        let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
+
+        App {
+            keyboard_send,
+            keyboard_recv,
+            message_send,
+            message_recv,
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -25,20 +47,16 @@ async fn main() {
         .await
         .expect("can't connect");
 
-    let (write_to_server_channel, mut write_to_server_broadcast) =
-        tokio::sync::broadcast::channel(16);
-    let (receive_from_server_channel, mut incoming_from_server_channel) =
-        tokio::sync::mpsc::channel(16);
     let (write, reader) = socket.split();
-    tokio::spawn(write_to_server(write, write_to_server_channel));
-    tokio::spawn(receive_from_server(reader, receive_from_server_channel));
-    terminal.clear();
+    let mut app = App::new();
+    tokio::spawn(write_to_server(write, app.keyboard_send));
+    tokio::spawn(receive_from_server(reader, app.message_send));
     loop {
         tokio::select! {
-            exit_broadcast = write_to_server_broadcast.recv() => {
+            exit_broadcast = app.keyboard_recv.recv() => {
                 break;
             },
-            msg_recv = incoming_from_server_channel.recv() => {
+            msg_recv = app.message_recv.recv() => {
                 if let Some(m) = msg_recv {
                     println!("Received: {}", m);
                 }
