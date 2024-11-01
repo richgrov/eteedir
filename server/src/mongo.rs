@@ -55,4 +55,11 @@ impl Mongo {
 
         Ok(())
     }
+
+    pub async fn delete_message(&self, message_id: ObjectId) -> Result<(), mongodb::error::Error> {
+        self.messages
+            .delete_one(doc! { "_id": message_id }, None)
+            .await?;
+        Ok(())
+    }
 }
