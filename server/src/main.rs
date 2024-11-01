@@ -2,8 +2,6 @@ mod mongo;
 
 use futures_util::{SinkExt, StreamExt};
 use mongo::Mongo;
-use mongodb::{bson::doc, Client, Collection};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,11 +10,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, WebSocketStream};
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Content {
-    content: String,
-}
 
 struct Server {
     map: RwLock<HashMap<SocketAddr, Arc<RwLock<Connection>>>>,
@@ -72,11 +65,13 @@ impl Server {
                             content: text.to_owned(),
                         };
 
-                        cloned_self
+                        let id = cloned_self
                             .mongo
                             .insert_message(&eteedir_msg)
                             .await
                             .unwrap();
+
+                        cloned_self.mongo.delete_message(id).await.unwrap();
                     }
 
                     for each in cloned_self.map.read().await.values() {
