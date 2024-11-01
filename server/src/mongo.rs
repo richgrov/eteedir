@@ -1,3 +1,5 @@
+use bson::doc;
+use bson::oid::ObjectId;
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -30,8 +32,27 @@ impl Mongo {
         cursor.try_collect().await
     }
 
-    pub async fn insert_message(&self, message: &Message) -> Result<(), mongodb::error::Error> {
-        self.messages.insert_one(message, None).await?;
+    pub async fn insert_message(
+        &self,
+        message: &Message,
+    ) -> Result<ObjectId, mongodb::error::Error> {
+        let doc = self.messages.insert_one(message, None).await?;
+        Ok(doc.inserted_id.as_object_id().unwrap())
+    }
+
+    pub async fn edit_message(
+        &self,
+        message_id: ObjectId,
+        new_content: String,
+    ) -> Result<(), mongodb::error::Error> {
+        self.messages
+            .update_one(
+                doc! { "_id": message_id },
+                doc! { "$set": { "content": new_content } },
+                None,
+            )
+            .await?;
+
         Ok(())
     }
 }
