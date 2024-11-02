@@ -8,3 +8,6 @@ services:
     build: ./server
     ports:
       - "80:8080"
+    environment:
+      - ADDRESS=0.0.0.0:80
+      - MONGODB=mongo:27017
