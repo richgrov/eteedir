@@ -1,4 +1,4 @@
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::StreamExt;
 use ratatui::backend::CrosstermBackend;
@@ -10,21 +10,25 @@ use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-use tui_textarea::TextArea;
+use tui_textarea::{Key, TextArea};
 
-struct App {
+struct App<'a> {
     terminal: ratatui::Terminal<CrosstermBackend<std::io::Stdout>>,
     keyboard_send: broadcast::Sender<crossterm::event::Event>,
     keyboard_recv: broadcast::Receiver<crossterm::event::Event>,
     message_send: mpsc::Sender<String>,
     message_recv: mpsc::Receiver<String>,
     should_exit: bool,
+    input: TextArea<'a>,
 }
 
-impl App {
-    pub fn new() -> App {
+impl<'a> App<'a> {
+    pub fn new() -> App<'a> {
         let (keyboard_send, keyboard_recv) = tokio::sync::broadcast::channel(16);
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
+
+        let mut textarea = TextArea::default();
+        textarea.set_placeholder_text("Type a message...");
 
         App {
             terminal: ratatui::init(),
@@ -33,6 +37,7 @@ impl App {
             message_send,
             message_recv,
             should_exit: false,
+            input: textarea,
         }
     }
 
@@ -42,6 +47,9 @@ impl App {
                 self.should_exit = true;
                 return;
             }
+
+            let input_event: tui_textarea::Input = event.into();
+            self.input.input(input_event);
         }
 
         self.draw();
@@ -53,10 +61,7 @@ impl App {
 
         self.terminal
             .draw(|frame| {
-                let greeting = Paragraph::new("Hello Ratatui! (press 'esc' to quit)")
-                    .white()
-                    .on_blue();
-                frame.render_widget(greeting, frame.area());
+                frame.render_widget(&self.input, frame.area());
             })
             .unwrap();
     }
