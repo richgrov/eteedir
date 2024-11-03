@@ -1,21 +1,19 @@
-use crossterm::event::{KeyCode, KeyEvent};
-use futures_util::stream::{SplitSink, SplitStream};
+use crossterm::event::KeyCode;
+use futures_util::stream::SplitStream;
 use futures_util::StreamExt;
 use ratatui::backend::CrosstermBackend;
-use ratatui::style::Stylize;
-use ratatui::widgets::Paragraph;
 use ratatui::{text::Text, Frame};
 use std::io::Error;
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-use tui_textarea::{Key, TextArea};
+use tui_textarea::TextArea;
 
 struct App<'a> {
     terminal: ratatui::Terminal<CrosstermBackend<std::io::Stdout>>,
-    keyboard_send: broadcast::Sender<crossterm::event::Event>,
-    keyboard_recv: broadcast::Receiver<crossterm::event::Event>,
+    keyboard_send: mpsc::Sender<crossterm::event::Event>,
+    keyboard_recv: mpsc::Receiver<crossterm::event::Event>,
     message_send: mpsc::Sender<String>,
     message_recv: mpsc::Receiver<String>,
     should_exit: bool,
@@ -24,7 +22,7 @@ struct App<'a> {
 
 impl<'a> App<'a> {
     pub fn new() -> App<'a> {
-        let (keyboard_send, keyboard_recv) = tokio::sync::broadcast::channel(16);
+        let (keyboard_send, keyboard_recv) = mpsc::channel(16);
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
 
         let mut textarea = TextArea::default();
@@ -83,7 +81,7 @@ async fn main() {
 
     let (write, reader) = socket.split();
     let mut app = App::new();
-    tokio::spawn(write_to_server(write, app.keyboard_send.clone()));
+    tokio::spawn(read_console_input(app.keyboard_send.clone()));
     tokio::spawn(receive_from_server(reader, app.message_send.clone()));
 
     app.terminal.clear().unwrap();
@@ -91,13 +89,9 @@ async fn main() {
 
     while !app.should_exit {
         tokio::select! {
-            key = app.keyboard_recv.recv() => {
-                match key {
-                    Ok(k) => app.on_key_press(k),
-                    Err(e) => {
-                        eprintln!("uh oh! {}", e);
-                        break;
-                    }
+            maybe_event = app.keyboard_recv.recv() => {
+                if let Some(event) = maybe_event {
+                    app.on_key_press(event);
                 }
             },
             msg_recv = app.message_recv.recv() => {
@@ -116,16 +110,13 @@ fn draw(frame: &mut Frame) {
     frame.render_widget(test, frame.area());
 }
 
-async fn write_to_server(
-    mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    sending_channel: tokio::sync::broadcast::Sender<crossterm::event::Event>,
-) {
+async fn read_console_input(sending_channel: mpsc::Sender<crossterm::event::Event>) {
     loop {
         let event = crossterm::event::read().expect("kjsahfkjsahfkjadsf");
 
-        sending_channel
-            .send(event)
-            .expect("Couldn't exit successfully");
+        if sending_channel.send(event).await.is_err() {
+            break;
+        }
     }
 }
 
