@@ -29,10 +29,6 @@ impl<'a> App<'a> {
         let (keyboard_send, keyboard_recv) = mpsc::channel(16);
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
 
-        let mut textarea = TextArea::default();
-        textarea.set_placeholder_text("Type a message...");
-        textarea.set_block(Block::default().borders(Borders::ALL));
-
         App {
             terminal: ratatui::init(),
             keyboard_send,
@@ -41,7 +37,7 @@ impl<'a> App<'a> {
             inbound_message_recv: message_recv,
             outbound_message_send,
             should_exit: false,
-            input: textarea,
+            input: Self::create_input_textarea(),
             history: Vec::new(),
         }
     }
@@ -56,6 +52,7 @@ impl<'a> App<'a> {
 
                 KeyCode::Enter => {
                     let msg = self.input.lines()[0].clone();
+                    self.input = Self::create_input_textarea();
                     self.outbound_message_send.try_send(msg).unwrap();
                 }
 
@@ -82,6 +79,13 @@ impl<'a> App<'a> {
                 frame.render_widget(&history_paragraph, history_rect);
             })
             .unwrap();
+    }
+
+    fn create_input_textarea() -> TextArea<'a> {
+        let mut textarea = TextArea::default();
+        textarea.set_placeholder_text("Type a message...");
+        textarea.set_block(Block::default().borders(Borders::ALL));
+        textarea
     }
 }
 
