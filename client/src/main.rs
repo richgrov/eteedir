@@ -68,7 +68,6 @@ impl<'a> App<'a> {
     }
 
     pub fn draw(&mut self) {
-        self.terminal.draw(draw).expect("uh oh");
         self.terminal
             .draw(|frame| {
                 let area = frame.area();
@@ -122,11 +121,6 @@ async fn main() {
     }
     ratatui::restore();
     panic!();
-}
-
-fn draw(frame: &mut Frame) {
-    let test = Text::raw("hello");
-    frame.render_widget(test, frame.area());
 }
 
 async fn read_console_input(sending_channel: mpsc::Sender<crossterm::event::Event>) {
