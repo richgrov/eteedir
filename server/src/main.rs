@@ -3,12 +3,13 @@ mod mongo;
 use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use mongo::Mongo;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{
-    broadcast,
-    broadcast::{Receiver, Sender},
+    mpsc,
+    mpsc::{Receiver, Sender},
 };
 use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message;
@@ -25,6 +26,7 @@ impl Server {
         tx: Sender<String>,
         mut rx: Receiver<String>,
         stream: TcpStream,
+        address: SocketAddr,
     ) {
         let socket = accept_async(stream).await.unwrap();
         let (mut write, read) = socket.split();
@@ -63,7 +65,7 @@ async fn main() {
         ),
     });
 
-    let (tx, _) = broadcast::channel::<String>(16);
+    let (sender, mut channel) = mpsc::channel(16);
 
     loop {
         let server = server.clone();
@@ -71,8 +73,7 @@ async fn main() {
 
         println!("Connection: {}", address);
 
-        let rx = tx.clone().subscribe();
-        tokio::spawn(server.handle_connection(tx.clone(), rx, stream));
+        tokio::spawn(server.handle_connection(sender.clone(), channel, stream, address));
     }
 }
 
@@ -96,7 +97,7 @@ async fn read_incoming_messages(
                 })
                 .await
                 .unwrap();
-            sender.send(message.to_string()).unwrap();
+            sender.send(message.to_string()).await.unwrap();
         }
     }
     Ok(())
