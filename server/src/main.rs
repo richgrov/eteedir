@@ -1,7 +1,7 @@
-use futures::TryStreamExt;
+mod mongo;
+
 use futures_util::{SinkExt, StreamExt};
-use mongodb::{bson::doc, Client, Collection};
-use serde::{Deserialize, Serialize};
+use mongo::Mongo;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,14 +11,10 @@ use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Content {
-    content: String,
-}
-
 struct Server {
     map: RwLock<HashMap<SocketAddr, Arc<RwLock<Connection>>>>,
     connection: TcpListener,
+    mongo: Arc<mongo::Mongo>,
 }
 
 struct Connection {
@@ -42,15 +38,13 @@ impl Server {
                     .await
                     .insert(address, connection.clone());
 
-                let history = read_database().await.unwrap();
-
+                let history = cloned_self.mongo.all_messages().await.unwrap();
                 for item in history {
-                    println!("{}", item);
                     connection
                         .write()
                         .await
                         .socket
-                        .send(Message::Text(item))
+                        .send(Message::Text(item.content))
                         .await
                         .unwrap();
                 }
@@ -66,19 +60,27 @@ impl Server {
                         }
                     };
 
-                    if message.is_text() {
-                        let string_message = message.to_text().unwrap().to_string();
+                    if let Message::Text(text) = &message {
+                        let eteedir_msg = mongo::Message {
+                            content: text.to_owned(),
+                        };
 
-                        insert_message(string_message.to_string()).await.unwrap();
+                        let id = cloned_self
+                            .mongo
+                            .insert_message(&eteedir_msg)
+                            .await
+                            .unwrap();
 
-                        for each in cloned_self.map.read().await.values() {
-                            each.write()
-                                .await
-                                .socket
-                                .send(Message::Text(string_message.clone()))
-                                .await
-                                .unwrap();
-                        }
+                        cloned_self.mongo.delete_message(id).await.unwrap();
+                    }
+
+                    for each in cloned_self.map.read().await.values() {
+                        each.write()
+                            .await
+                            .socket
+                            .send(message.clone())
+                            .await
+                            .unwrap();
                     }
                 }
 
@@ -90,42 +92,20 @@ impl Server {
 
 #[tokio::main]
 async fn main() {
-    let address = std::env::var("ADDRESS").unwrap_or("0.0.0.0:8080".to_string());
+    let server_address = std::env::var("ADDRESS").unwrap_or("0.0.0.0:8080".to_string());
+    let mongo_address = std::env::var("MONGODB").unwrap_or("mongodb://mongo:27017".to_string());
+
     let server = Arc::new(Server {
         map: RwLock::new(HashMap::new()),
-        connection: TcpListener::bind(address).await.unwrap(),
+        connection: TcpListener::bind(server_address).await.unwrap(),
+        mongo: Arc::new(
+            Mongo::new(mongo_address, "eteedir")
+                .await
+                .expect("can't connect to mongo"),
+        ),
     });
 
     println!("say something just so i know it works");
 
     server.server_stream().await;
-}
-
-async fn read_database() -> mongodb::error::Result<Vec<String>> {
-    let address = std::env::var("MONGODB").unwrap_or("mongodb://mongo:27017".to_string());
-    let client = Client::with_uri_str(address).await?;
-    let database = client.database("eteedir");
-
-    let messages: Collection<Content> = database.collection("messages");
-    let mut cursor = messages.find(None, None).await?;
-    let mut vector = Vec::new();
-
-    while let Some(document) = cursor.try_next().await? {
-        vector.push(document.content);
-    }
-
-    Ok(vector)
-}
-
-async fn insert_message(message: String) -> mongodb::error::Result<()> {
-    let address = std::env::var("MONGODB").unwrap_or("mongodb://mongo:27017".to_string());
-    let client = Client::with_uri_str(address).await?;
-    let database = client.database("eteedir");
-    let messages = database.collection("messages");
-
-    messages
-        .insert_one(doc! { "content": message }, None)
-        .await?;
-
-    Ok(())
 }
