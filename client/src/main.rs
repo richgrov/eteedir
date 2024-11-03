@@ -67,6 +67,10 @@ impl<'a> App<'a> {
     }
 
     pub fn draw(&mut self) {
+
+        if self.history.len() > 26 {
+            self.history = self.history.split_off(self.history.len() - 24)
+        }
         let history_paragraph = Paragraph::new(self.history.join("\n"));
 
         self.terminal
