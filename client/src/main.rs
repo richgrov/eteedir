@@ -1,6 +1,6 @@
 use crossterm::event::KeyCode;
-use futures_util::stream::SplitStream;
-use futures_util::StreamExt;
+use futures_util::stream::{SplitSink, SplitStream};
+use futures_util::{SinkExt, StreamExt};
 use ratatui::backend::CrosstermBackend;
 use ratatui::{text::Text, Frame};
 use std::io::Error;
@@ -14,14 +14,15 @@ struct App<'a> {
     terminal: ratatui::Terminal<CrosstermBackend<std::io::Stdout>>,
     keyboard_send: mpsc::Sender<crossterm::event::Event>,
     keyboard_recv: mpsc::Receiver<crossterm::event::Event>,
-    message_send: mpsc::Sender<String>,
-    message_recv: mpsc::Receiver<String>,
+    inbound_message_send: mpsc::Sender<String>,
+    inbound_message_recv: mpsc::Receiver<String>,
+    outbound_message_send: mpsc::Sender<String>,
     should_exit: bool,
     input: TextArea<'a>,
 }
 
 impl<'a> App<'a> {
-    pub fn new() -> App<'a> {
+    pub fn new(outbound_message_send: mpsc::Sender<String>) -> App<'a> {
         let (keyboard_send, keyboard_recv) = mpsc::channel(16);
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
 
@@ -32,8 +33,9 @@ impl<'a> App<'a> {
             terminal: ratatui::init(),
             keyboard_send,
             keyboard_recv,
-            message_send,
-            message_recv,
+            inbound_message_send: message_send,
+            inbound_message_recv: message_recv,
+            outbound_message_send,
             should_exit: false,
             input: textarea,
         }
@@ -41,13 +43,22 @@ impl<'a> App<'a> {
 
     pub fn on_key_press(&mut self, event: crossterm::event::Event) {
         if let crossterm::event::Event::Key(k) = event {
-            if let KeyCode::Esc = k.code {
-                self.should_exit = true;
-                return;
-            }
+            match k.code {
+                KeyCode::Esc => {
+                    self.should_exit = true;
+                    return;
+                }
 
-            let input_event: tui_textarea::Input = event.into();
-            self.input.input(input_event);
+                KeyCode::Enter => {
+                    let msg = self.input.lines()[0].clone();
+                    self.outbound_message_send.try_send(msg).unwrap();
+                }
+
+                _ => {
+                    let input_event: tui_textarea::Input = event.into();
+                    self.input.input(input_event);
+                }
+            }
         }
 
         self.draw();
@@ -80,9 +91,14 @@ async fn main() {
         .expect("can't connect");
 
     let (write, reader) = socket.split();
-    let mut app = App::new();
+    let (outbound_msg_send, outbound_msg_recv) = mpsc::channel(8);
+    let mut app = App::new(outbound_msg_send);
     tokio::spawn(read_console_input(app.keyboard_send.clone()));
-    tokio::spawn(receive_from_server(reader, app.message_send.clone()));
+    tokio::spawn(send_to_server(write, outbound_msg_recv));
+    tokio::spawn(receive_from_server(
+        reader,
+        app.inbound_message_send.clone(),
+    ));
 
     app.terminal.clear().unwrap();
     app.draw();
@@ -94,9 +110,9 @@ async fn main() {
                     app.on_key_press(event);
                 }
             },
-            msg_recv = app.message_recv.recv() => {
+            msg_recv = app.inbound_message_recv.recv() => {
                 if let Some(m) = msg_recv {
-                    //println!("Received: {}", m);
+                    panic!("recived: {}", m);
                 }
             }
         }
@@ -116,6 +132,17 @@ async fn read_console_input(sending_channel: mpsc::Sender<crossterm::event::Even
 
         if sending_channel.send(event).await.is_err() {
             break;
+        }
+    }
+}
+
+async fn send_to_server(
+    mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+    mut outbound_messages: mpsc::Receiver<String>,
+) {
+    while let Some(msg) = outbound_messages.recv().await {
+        if let Err(e) = write.send(Message::Text(msg)).await {
+            eprintln!("failed to send message: {}", e);
         }
     }
 }
