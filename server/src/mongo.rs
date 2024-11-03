@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message {
     pub content: String,
+    pub created_at: bson::DateTime,
 }
 
 pub struct Mongo {
@@ -37,6 +38,15 @@ impl Mongo {
         pattern: String,
     ) -> Result<Vec<Message>, mongodb::error::Error> {
         let document = doc! { "content": { "$regex": pattern, "$options": "i" } };
+        let cursor = self.messages.find(document, None).await?;
+        cursor.try_collect().await
+    }
+
+    pub async fn find_messages_after(
+        &self,
+        after: bson::DateTime,
+    ) -> Result<Vec<Message>, mongodb::error::Error> {
+        let document = doc! { "created_at": { "$gt": after } };
         let cursor = self.messages.find(document, None).await?;
         cursor.try_collect().await
     }

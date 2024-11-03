@@ -63,6 +63,7 @@ impl Server {
                     if let Message::Text(text) = &message {
                         let eteedir_msg = mongo::Message {
                             content: text.to_owned(),
+                            created_at: bson::DateTime::now(),
                         };
 
                         let id = cloned_self
