@@ -3,7 +3,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{text::Text, Frame};
 use std::io::Error;
 use tokio::net::TcpStream;
@@ -21,6 +21,7 @@ struct App<'a> {
     outbound_message_send: mpsc::Sender<String>,
     should_exit: bool,
     input: TextArea<'a>,
+    history: Vec<String>,
 }
 
 impl<'a> App<'a> {
@@ -41,6 +42,7 @@ impl<'a> App<'a> {
             outbound_message_send,
             should_exit: false,
             input: textarea,
+            history: Vec::new(),
         }
     }
 
@@ -68,11 +70,16 @@ impl<'a> App<'a> {
     }
 
     pub fn draw(&mut self) {
+        let history_paragraph = Paragraph::new(self.history.join("\n"));
+
         self.terminal
             .draw(|frame| {
                 let area = frame.area();
                 let textbox_rect = Rect::new(0, area.height - 3, area.width, 3);
                 frame.render_widget(&self.input, textbox_rect);
+
+                let history_rect = Rect::new(0, 0, area.width, area.height - 3);
+                frame.render_widget(&history_paragraph, history_rect);
             })
             .unwrap();
     }
@@ -114,7 +121,8 @@ async fn main() {
             },
             msg_recv = app.inbound_message_recv.recv() => {
                 if let Some(m) = msg_recv {
-                    panic!("recived: {}", m);
+                    app.history.push(m);
+                    app.draw();
                 }
             }
         }
