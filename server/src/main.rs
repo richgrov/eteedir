@@ -110,7 +110,6 @@ async fn main() {
         ),
     });
 
-    println!("say something just so i know it works");
-
+    println!("Starting...");
     server.server_stream().await;
 }
