@@ -2,6 +2,8 @@ use crossterm::event::KeyCode;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::widgets::{Block, Borders};
 use ratatui::{text::Text, Frame};
 use std::io::Error;
 use tokio::net::TcpStream;
@@ -28,6 +30,7 @@ impl<'a> App<'a> {
 
         let mut textarea = TextArea::default();
         textarea.set_placeholder_text("Type a message...");
+        textarea.set_block(Block::default().borders(Borders::ALL));
 
         App {
             terminal: ratatui::init(),
@@ -66,11 +69,11 @@ impl<'a> App<'a> {
 
     pub fn draw(&mut self) {
         self.terminal.draw(draw).expect("uh oh");
-        let rect = ratatui::layout::Rect::new(100, 100, 100, 100);
-
         self.terminal
             .draw(|frame| {
-                frame.render_widget(&self.input, frame.area());
+                let area = frame.area();
+                let textbox_rect = Rect::new(0, area.height - 3, area.width, 3);
+                frame.render_widget(&self.input, textbox_rect);
             })
             .unwrap();
     }
