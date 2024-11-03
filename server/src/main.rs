@@ -1,92 +1,68 @@
+mod connection;
 mod mongo;
 
-use futures_util::{SinkExt, StreamExt};
+use connection::Connection;
 use mongo::Mongo;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{accept_async, WebSocketStream};
+use tokio::net::TcpListener;
+use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio_tungstenite::accept_async;
 
 struct Server {
-    map: RwLock<HashMap<SocketAddr, Arc<RwLock<Connection>>>>,
+    map: RwLock<HashMap<SocketAddr, Arc<Connection>>>,
     connection: TcpListener,
     mongo: Arc<mongo::Mongo>,
-}
-
-struct Connection {
-    socket: WebSocketStream<TcpStream>,
+    inbound_msg_send: mpsc::Sender<(SocketAddr, tokio_tungstenite::tungstenite::Message)>,
+    inbound_msg_recv: Mutex<mpsc::Receiver<(SocketAddr, tokio_tungstenite::tungstenite::Message)>>,
 }
 
 impl Server {
-    pub async fn server_stream(self: Arc<Server>) {
+    pub async fn accept_loop(self: Arc<Server>) {
         loop {
             let (stream, address) = self.connection.accept().await.unwrap();
 
+            let socket = accept_async(stream).await.unwrap();
+            let connection = Arc::new(Connection::new(
+                socket,
+                address,
+                self.inbound_msg_send.clone(),
+            ));
+
+            self.map.write().await.insert(address, connection.clone());
+
             let cloned_self = self.clone();
-
             tokio::spawn(async move {
-                let socket = accept_async(stream).await.unwrap();
-                let connection = Arc::new(RwLock::new(Connection { socket }));
-
-                cloned_self
-                    .map
-                    .write()
-                    .await
-                    .insert(address, connection.clone());
-
                 let history = cloned_self.mongo.all_messages().await.unwrap();
                 for item in history {
-                    connection
-                        .write()
-                        .await
-                        .socket
-                        .send(Message::Text(item.content))
-                        .await
-                        .unwrap();
+                    connection.queue_message(item).await;
                 }
-
-                loop {
-                    let probably_message = connection.write().await.socket.next().await.unwrap();
-
-                    let message = match probably_message {
-                        Ok(m) => m,
-                        Err(_) => {
-                            cloned_self.map.write().await.remove(&address);
-                            break;
-                        }
-                    };
-
-                    if let Message::Text(text) = &message {
-                        let eteedir_msg = mongo::Message {
-                            content: text.to_owned(),
-                            created_at: bson::DateTime::now(),
-                        };
-
-                        let id = cloned_self
-                            .mongo
-                            .insert_message(&eteedir_msg)
-                            .await
-                            .unwrap();
-
-                        cloned_self.mongo.delete_message(id).await.unwrap();
-                    }
-
-                    for each in cloned_self.map.read().await.values() {
-                        each.write()
-                            .await
-                            .socket
-                            .send(message.clone())
-                            .await
-                            .unwrap();
-                    }
-                }
-
-                Result::<(), tokio_tungstenite::tungstenite::Error>::Ok(())
             });
+        }
+    }
+
+    pub async fn run(self: &Arc<Server>) {
+        let mut inbound_msg_recv = self.inbound_msg_recv.lock().await;
+        while let Some((address, message)) = inbound_msg_recv.recv().await {
+            self.message_received(address, message).await;
+        }
+    }
+
+    pub async fn message_received(
+        self: &Arc<Server>,
+        _client_address: SocketAddr,
+        message: tokio_tungstenite::tungstenite::Message,
+    ) {
+        let eteedir_msg = mongo::Message {
+            content: message.into_text().unwrap(),
+            created_at: bson::DateTime::now(),
+        };
+
+        self.mongo.insert_message(&eteedir_msg).await.unwrap();
+
+        for client in self.map.read().await.values() {
+            client.queue_message(eteedir_msg.clone()).await;
         }
     }
 }
@@ -100,6 +76,8 @@ async fn main() {
     let server_address = std::env::var("ADDRESS").expect("ADDRESS not set");
     let mongo_address = std::env::var("MONGODB").expect("MONGODB not set");
 
+    let (inbound_msg_send, inbound_msg_recv) = mpsc::channel(64);
+
     let server = Arc::new(Server {
         map: RwLock::new(HashMap::new()),
         connection: TcpListener::bind(server_address).await.unwrap(),
@@ -108,8 +86,11 @@ async fn main() {
                 .await
                 .expect("can't connect to mongo"),
         ),
+        inbound_msg_send,
+        inbound_msg_recv: Mutex::new(inbound_msg_recv),
     });
 
+    tokio::spawn(server.clone().accept_loop());
     println!("Starting...");
-    server.server_stream().await;
+    server.run().await;
 }

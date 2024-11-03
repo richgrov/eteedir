@@ -3,7 +3,7 @@ use bson::oid::ObjectId;
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
     pub content: String,
     pub created_at: bson::DateTime,
