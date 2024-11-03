@@ -92,14 +92,18 @@ impl Server {
 
 #[tokio::main]
 async fn main() {
-    let server_address = std::env::var("ADDRESS").unwrap_or("0.0.0.0:8080".to_string());
-    let mongo_address = std::env::var("MONGODB").unwrap_or("mongodb://mongo:27017".to_string());
+    if let Err(_) = dotenvy::dotenv() {
+        eprintln!(".env was not loaded");
+    }
+
+    let server_address = std::env::var("ADDRESS").expect("ADDRESS not set");
+    let mongo_address = std::env::var("MONGODB").expect("MONGODB not set");
 
     let server = Arc::new(Server {
         map: RwLock::new(HashMap::new()),
         connection: TcpListener::bind(server_address).await.unwrap(),
         mongo: Arc::new(
-            Mongo::new(mongo_address, "eteedir")
+            Mongo::new(format!("mongodb://{}/", mongo_address), "eteedir")
                 .await
                 .expect("can't connect to mongo"),
         ),
