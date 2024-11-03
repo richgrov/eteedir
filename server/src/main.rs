@@ -42,9 +42,7 @@ impl Server {
         loop {
             tokio::select! {
                 msg_recv = rx.recv() => {
-                    if let msg = msg_recv {
-                        write.send(Message::Text(msg.unwrap().to_string())).await.unwrap();
-                    }
+                    write.send(Message::Text(msg_recv.unwrap().to_string())).await.unwrap();
                 }
             }
         }
