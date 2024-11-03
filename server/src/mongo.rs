@@ -32,6 +32,15 @@ impl Mongo {
         cursor.try_collect().await
     }
 
+    pub async fn find_messages(
+        &self,
+        pattern: String,
+    ) -> Result<Vec<Message>, mongodb::error::Error> {
+        let document = doc! { "content": { "$regex": pattern, "$options": "i" } };
+        let cursor = self.messages.find(document, None).await?;
+        cursor.try_collect().await
+    }
+
     pub async fn insert_message(
         &self,
         message: &Message,
