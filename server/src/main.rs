@@ -1,91 +1,52 @@
 mod mongo;
 
+use futures_util::stream::SplitStream;
 use futures_util::{SinkExt, StreamExt};
 use mongo::Mongo;
-use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
+use tokio::sync::{
+    broadcast,
+    broadcast::{Receiver, Sender},
+};
+use tokio_tungstenite::tungstenite::Error;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_async, WebSocketStream};
 
 struct Server {
-    map: RwLock<HashMap<SocketAddr, Arc<RwLock<Connection>>>>,
     connection: TcpListener,
     mongo: Arc<mongo::Mongo>,
 }
 
-struct Connection {
-    socket: WebSocketStream<TcpStream>,
-}
-
 impl Server {
-    pub async fn server_stream(self: Arc<Server>) {
+    async fn handle_connection(
+        self: Arc<Server>,
+        tx: Sender<String>,
+        mut rx: Receiver<String>,
+        stream: TcpStream,
+    ) {
+        let socket = accept_async(stream).await.unwrap();
+        let (mut write, read) = socket.split();
+
+        let history = self.mongo.all_messages().await.unwrap();
+        for message in history {
+            write
+                .send(Message::Text(message.content.to_string()))
+                .await
+                .unwrap();
+        }
+
+        tokio::spawn(read_incoming_messages(self.mongo.clone(), read, tx));
+
         loop {
-            let (stream, address) = self.connection.accept().await.unwrap();
-
-            let cloned_self = self.clone();
-
-            tokio::spawn(async move {
-                let socket = accept_async(stream).await.unwrap();
-                let connection = Arc::new(RwLock::new(Connection { socket }));
-
-                cloned_self
-                    .map
-                    .write()
-                    .await
-                    .insert(address, connection.clone());
-
-                let history = cloned_self.mongo.all_messages().await.unwrap();
-                for item in history {
-                    connection
-                        .write()
-                        .await
-                        .socket
-                        .send(Message::Text(item.content))
-                        .await
-                        .unwrap();
-                }
-
-                loop {
-                    let probably_message = connection.write().await.socket.next().await.unwrap();
-
-                    let message = match probably_message {
-                        Ok(m) => m,
-                        Err(_) => {
-                            cloned_self.map.write().await.remove(&address);
-                            break;
-                        }
-                    };
-
-                    if let Message::Text(text) = &message {
-                        let eteedir_msg = mongo::Message {
-                            content: text.to_owned(),
-                        };
-
-                        let id = cloned_self
-                            .mongo
-                            .insert_message(&eteedir_msg)
-                            .await
-                            .unwrap();
-
-                        cloned_self.mongo.delete_message(id).await.unwrap();
-                    }
-
-                    for each in cloned_self.map.read().await.values() {
-                        each.write()
-                            .await
-                            .socket
-                            .send(message.clone())
-                            .await
-                            .unwrap();
+            tokio::select! {
+                msg_recv = rx.recv() => {
+                    if let msg = msg_recv {
+                        write.send(Message::Text(msg.unwrap().to_string())).await.unwrap();
                     }
                 }
-
-                Result::<(), tokio_tungstenite::tungstenite::Error>::Ok(())
-            });
+            }
         }
     }
 }
@@ -96,7 +57,6 @@ async fn main() {
     let mongo_address = std::env::var("MONGODB").unwrap_or("mongodb://mongo:27017".to_string());
 
     let server = Arc::new(Server {
-        map: RwLock::new(HashMap::new()),
         connection: TcpListener::bind(server_address).await.unwrap(),
         mongo: Arc::new(
             Mongo::new(mongo_address, "eteedir")
@@ -105,7 +65,41 @@ async fn main() {
         ),
     });
 
-    println!("say something just so i know it works");
+    let (tx, _) = broadcast::channel::<String>(16);
 
-    server.server_stream().await;
+    loop {
+        let server = server.clone();
+        let (stream, address) = server.connection.accept().await.unwrap();
+
+        println!("Connection: {}", address);
+
+        let rx = tx.clone().subscribe();
+        tokio::spawn(server.handle_connection(tx.clone(), rx, stream));
+    }
+}
+
+async fn read_incoming_messages(
+    mongo: Arc<mongo::Mongo>,
+    mut read: SplitStream<WebSocketStream<TcpStream>>,
+    sender: Sender<String>,
+) -> Result<(), Error> {
+    while let Some(maybe_message) = read.next().await {
+        let message = match maybe_message {
+            Ok(m) => m,
+            Err(_) => {
+                break;
+            }
+        };
+
+        if message.is_text() {
+            mongo
+                .insert_message(&mongo::Message {
+                    content: message.to_string(),
+                })
+                .await
+                .unwrap();
+            sender.send(message.to_string()).unwrap();
+        }
+    }
+    Ok(())
 }
