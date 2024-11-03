@@ -8,11 +8,6 @@ pub struct Message {
     pub content: String,
 }
 
-pub struct Query {
-    pub operation: String,
-    pub value: String,
-}
-
 pub struct Mongo {
     connection: mongodb::Client,
     messages: mongodb::Collection<Message>,
@@ -37,8 +32,11 @@ impl Mongo {
         cursor.try_collect().await
     }
 
-    pub async fn get_messages(&self, query: Query) -> Result<Vec<Message>, mongodb::error::Error> {
-        let document = doc! { query.operation: query.value };
+    pub async fn find_messages(
+        &self,
+        pattern: String,
+    ) -> Result<Vec<Message>, mongodb::error::Error> {
+        let document = doc! { "content": { "$regex": pattern, "$options": "i" } };
         let cursor = self.messages.find(document, None).await?;
         cursor.try_collect().await
     }
