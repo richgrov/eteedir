@@ -103,7 +103,7 @@ async fn main() {
         map: RwLock::new(HashMap::new()),
         connection: TcpListener::bind(server_address).await.unwrap(),
         mongo: Arc::new(
-            Mongo::new(mongo_address, "eteedir")
+            Mongo::new(format!("mongodb://{}/", mongo_address), "eteedir")
                 .await
                 .expect("can't connect to mongo"),
         ),
