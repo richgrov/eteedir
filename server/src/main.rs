@@ -1,7 +1,10 @@
+mod cassandra;
 mod connection;
 mod mongo;
 
+use cassandra::Cassandra;
 use connection::Connection;
+use futures_util::{SinkExt, StreamExt};
 use mongo::Mongo;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -73,8 +76,8 @@ async fn main() {
         eprintln!(".env was not loaded");
     }
 
-    let server_address = std::env::var("ADDRESS").expect("ADDRESS not set");
-    let mongo_address = std::env::var("MONGODB").expect("MONGODB not set");
+    let server_address = std::env::var("address").expect("address not set");
+    let mongo_address = std::env::var("mongodb").expect("mongodb not set");
 
     let (inbound_msg_send, inbound_msg_recv) = mpsc::channel(64);
 
