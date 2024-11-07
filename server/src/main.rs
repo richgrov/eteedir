@@ -1,7 +1,10 @@
+mod cassandra;
 mod connection;
 mod mongo;
 
+use cassandra::Cassandra;
 use connection::Connection;
+use futures_util::{SinkExt, StreamExt};
 use mongo::Mongo;
 use std::collections::HashMap;
 use std::net::SocketAddr;
