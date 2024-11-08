@@ -73,7 +73,6 @@ impl Cassandra {
         self.session
             .query_unpaged("DELETE FROM eteedir.messages WHERE id = (?)", (id,))
             .await?;
-        self.last_id = id;
 
         Ok(())
     }
