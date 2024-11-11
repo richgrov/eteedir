@@ -68,8 +68,8 @@ impl Cassandra {
             .into_typed::<(String,)>();
 
         let mut vec = Vec::new();
-        while let Some(m) = messages.try_next().await? {
-            vec.push(Message { content: m.0 });
+        while let Some((message,)) = messages.try_next().await? {
+            vec.push(Message { content: message });
         }
 
         Ok(vec)
