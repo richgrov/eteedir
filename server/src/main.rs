@@ -1,6 +1,5 @@
 mod cassandra;
 mod connection;
-mod mongo;
 
 use cassandra::Cassandra;
 use connection::Connection;
