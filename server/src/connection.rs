@@ -6,12 +6,12 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 
-use crate::mongo;
+use crate::cassandra;
 
 type Socket = WebSocketStream<TcpStream>;
 
 pub struct Connection {
-    outbound_msg_send: mpsc::Sender<mongo::Message>,
+    outbound_msg_send: mpsc::Sender<cassandra::Message>,
 }
 
 impl Connection {
@@ -31,7 +31,7 @@ impl Connection {
         }
     }
 
-    pub async fn queue_message(&self, message: mongo::Message) {
+    pub async fn queue_message(&self, message: cassandra::Message) {
         let _ = self.outbound_msg_send.send(message).await;
     }
 
@@ -59,7 +59,7 @@ impl Connection {
 
     pub async fn write_loop(
         mut write: SplitSink<Socket, tokio_tungstenite::tungstenite::Message>,
-        mut outbound_messages: mpsc::Receiver<mongo::Message>,
+        mut outbound_messages: mpsc::Receiver<cassandra::Message>,
     ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
         while let Some(msg) = outbound_messages.recv().await {
             let ws_message = tokio_tungstenite::tungstenite::Message::Text(msg.content);

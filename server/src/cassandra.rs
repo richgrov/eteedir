@@ -1,16 +1,21 @@
 use futures::TryStreamExt;
-use scylla::transport::iterator::TypedRowIterator;
 use scylla::{IntoTypedRows, Session, SessionBuilder};
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Message {
+    pub content: String,
+}
+
 pub struct Cassandra {
-    pub session: Session,
-    pub last_id: i64,
+    session: Session,
+    last_id: i64,
 }
 
 impl Cassandra {
-    pub async fn new() -> Result<Cassandra, Box<dyn Error>> {
-        let uri = std::env::var("").unwrap_or_else(|_| "127.0.0.1:9042".to_string());
+    pub async fn new(address: impl AsRef<str>) -> Result<Cassandra, Box<dyn Error>> {
+        let uri = address;
         let session = SessionBuilder::new().known_node(uri).build().await?;
 
         let mut message = session
@@ -32,19 +37,19 @@ impl Cassandra {
         })
     }
 
-    pub async fn insert_content(&mut self, content: String) -> Result<(), Box<dyn Error>> {
-        self.last_id += 1;
+    pub async fn insert_message(&self, message: &Message) -> Result<(), Box<dyn Error>> {
+        // self.last_id += 1;
         self.session
             .query_unpaged(
                 "INSERT INTO eteedir.messages (id, message) VALUES(?, ?)",
-                (self.last_id, content),
+                (self.last_id, message.content.clone()),
             )
             .await?;
 
         Ok(())
     }
 
-    pub async fn update_content(&self, id: i64, update: String) -> Result<(), Box<dyn Error>> {
+    pub async fn update_message(&self, id: i64, update: String) -> Result<(), Box<dyn Error>> {
         self.session
             .query_unpaged(
                 "UPDATE eteedir.messages SET message = (?) WHERE id = (?)",
@@ -55,21 +60,22 @@ impl Cassandra {
         Ok(())
     }
 
-    pub async fn read_content(&self) -> Result<TypedRowIterator<(String,)>, Box<dyn Error>> {
+    pub async fn read_messages(&self) -> Result<Vec<Message>, Box<dyn Error>> {
         let mut messages = self
             .session
             .query_iter("SELECT message FROM eteedir.messages", &[])
             .await?
             .into_typed::<(String,)>();
 
-        while let Some(m) = messages.try_next().await? {
-            println!("Message: {}", m.0);
+        let mut vec = Vec::new();
+        while let Some((message,)) = messages.try_next().await? {
+            vec.push(Message { content: message });
         }
 
-        Ok(messages)
+        Ok(vec)
     }
 
-    pub async fn delete_content(&mut self, id: i64) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_message(&mut self, id: i64) -> Result<(), Box<dyn Error>> {
         self.session
             .query_unpaged("DELETE FROM eteedir.messages WHERE id = (?)", (id,))
             .await?;

@@ -4,8 +4,6 @@ mod mongo;
 
 use cassandra::Cassandra;
 use connection::Connection;
-use futures_util::{SinkExt, StreamExt};
-use mongo::Mongo;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -16,7 +14,7 @@ use tokio_tungstenite::accept_async;
 struct Server {
     map: RwLock<HashMap<SocketAddr, Arc<Connection>>>,
     connection: TcpListener,
-    mongo: Arc<mongo::Mongo>,
+    dal: Arc<cassandra::Cassandra>,
     inbound_msg_send: mpsc::Sender<(SocketAddr, tokio_tungstenite::tungstenite::Message)>,
     inbound_msg_recv: Mutex<mpsc::Receiver<(SocketAddr, tokio_tungstenite::tungstenite::Message)>>,
 }
@@ -37,7 +35,8 @@ impl Server {
 
             let cloned_self = self.clone();
             tokio::spawn(async move {
-                let history = cloned_self.mongo.all_messages().await.unwrap();
+                let history = cloned_self.dal.read_messages().await.unwrap();
+
                 for item in history {
                     connection.queue_message(item).await;
                 }
@@ -57,12 +56,11 @@ impl Server {
         _client_address: SocketAddr,
         message: tokio_tungstenite::tungstenite::Message,
     ) {
-        let eteedir_msg = mongo::Message {
+        let eteedir_msg = cassandra::Message {
             content: message.into_text().unwrap(),
-            created_at: bson::DateTime::now(),
         };
 
-        self.mongo.insert_message(&eteedir_msg).await.unwrap();
+        self.dal.insert_message(&eteedir_msg).await.unwrap();
 
         for client in self.map.read().await.values() {
             client.queue_message(eteedir_msg.clone()).await;
@@ -77,17 +75,17 @@ async fn main() {
     }
 
     let server_address = std::env::var("ADDRESS").expect("ADDRESS not set");
-    let mongo_address = std::env::var("MONGODB").expect("MONGODB not set");
+    let cassandra_address = std::env::var("CASSANDRA").expect("CASSANDRA not set");
 
     let (inbound_msg_send, inbound_msg_recv) = mpsc::channel(64);
 
     let server = Arc::new(Server {
         map: RwLock::new(HashMap::new()),
         connection: TcpListener::bind(server_address).await.unwrap(),
-        mongo: Arc::new(
-            Mongo::new(format!("mongodb://{}/", mongo_address), "eteedir")
+        dal: Arc::new(
+            Cassandra::new(cassandra_address)
                 .await
-                .expect("can't connect to mongo"),
+                .expect("can't connect to cassandra"),
         ),
         inbound_msg_send,
         inbound_msg_recv: Mutex::new(inbound_msg_recv),
