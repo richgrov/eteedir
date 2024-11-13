@@ -68,11 +68,7 @@ pub fn network_decode<'a>(raw: &'a str) -> Result<(&'a str, &'a str), std::io::E
 
 #[derive(Serialize, Deserialize)]
 pub struct ServerboundHandshake {
-    #[serde(
-        serialize_with = "serialize_as_base64",
-        deserialize_with = "deserialize_from_base64"
-    )]
-    pub public_key: Vec<u8>,
+    pub public_key: String,
 }
 
 impl Packet for ServerboundHandshake {

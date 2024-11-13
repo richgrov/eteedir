@@ -107,7 +107,9 @@ impl<'a> App<'a> {
             .public_key_to_pem()
             .expect("failed to encode public key as PEM");
 
-        self.queue_packet(ServerboundHandshake { public_key: pem });
+        self.queue_packet(ServerboundHandshake {
+            public_key: String::from_utf8(pem).unwrap(),
+        });
     }
 
     pub fn draw(&mut self) {
