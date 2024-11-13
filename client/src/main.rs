@@ -1,4 +1,4 @@
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, self, Event, MouseEvent, MouseEventKind};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use ratatui::backend::CrosstermBackend;
@@ -6,6 +6,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{text::Text, Frame};
 use std::io::Error;
+use ratatui::style::{Color, Style};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
@@ -22,6 +23,7 @@ struct App<'a> {
     should_exit: bool,
     input: TextArea<'a>,
     history: Vec<String>,
+    selected_message: Option<String>,
 }
 
 impl<'a> App<'a> {
@@ -39,6 +41,7 @@ impl<'a> App<'a> {
             should_exit: false,
             input: Self::create_input_textarea(),
             history: Vec::new(),
+            selected_message: None,
         }
     }
 
@@ -67,18 +70,54 @@ impl<'a> App<'a> {
     }
 
     pub fn draw(&mut self) {
-        let history_paragraph = Paragraph::new(self.history.join("\n"));
+        let history_paragraph = Paragraph::new(self.history.join("\n"))
+            .style(match &self.selected_message {
+                Some(message) => Style::default().fg(Color::Yellow),
+                None => Style::default(),
+            });
 
         self.terminal
             .draw(|frame| {
                 let area = frame.area();
+                let test = frame.size();
                 let textbox_rect = Rect::new(0, area.height - 3, area.width, 3);
                 frame.render_widget(&self.input, textbox_rect);
 
                 let history_rect = Rect::new(0, 0, area.width, area.height - 3);
                 frame.render_widget(&history_paragraph, history_rect);
+
+                let mut message_rects = Vec::new();
+                for (i, _message) in self.history.iter().enumerate() {
+                    let y = i as u16;
+                    let message_rect = Rect::new(0, y, test.width, 1);
+                    message_rects.push(message_rect);
+                }
+
+                if let Ok(true) = event::poll(std::time::Duration::from_millis(1)) {
+                    if let Ok(Event::Mouse(MouseEvent {
+                                               kind: MouseEventKind::Down(_),
+                                               column,
+                                               row,
+                                               ..
+                                           })) = event::read()
+                    {
+                        for (i, message_rect) in message_rects.iter().enumerate() {
+                            if Self::is_mouse_in_rect(column, row, *message_rect) {
+                                self.selected_message = Some(self.history[i].clone());
+                                break;
+                            }
+                        }
+                    }
+                }
             })
             .unwrap();
+    }
+
+    fn is_mouse_in_rect(column: u16, row: u16, rect: Rect) -> bool {
+        column >= rect.x
+            && column < rect.x + rect.width
+            && row >= rect.y
+            && row < rect.y + rect.height
     }
 
     fn create_input_textarea() -> TextArea<'a> {
