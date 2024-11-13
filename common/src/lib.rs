@@ -21,10 +21,10 @@ pub struct MessagePacket {
         serialize_with = "serialize_as_base64",
         deserialize_with = "deserialize_from_base64"
     )]
-    pub public_key: [u8; 256],
+    pub signature: Vec<u8>,
 }
 
-fn serialize_as_base64<S>(val: &[u8; 256], serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_as_base64<S>(val: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -32,7 +32,7 @@ where
     serializer.serialize_str(&encoded)
 }
 
-fn deserialize_from_base64<'de, D>(deserializer: D) -> Result<[u8; 256], D::Error>
+fn deserialize_from_base64<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -64,4 +64,17 @@ pub fn network_decode<'a>(raw: &'a str) -> Result<(&'a str, &'a str), std::io::E
     };
 
     Ok((id, json_data))
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ServerboundHandshake {
+    #[serde(
+        serialize_with = "serialize_as_base64",
+        deserialize_with = "deserialize_from_base64"
+    )]
+    pub public_key: Vec<u8>,
+}
+
+impl Packet for ServerboundHandshake {
+    const ID: &'static str = "serverbound_handshake";
 }

@@ -1,9 +1,11 @@
-use common::{MessagePacket, Packet};
+use common::{MessagePacket, Packet, ServerboundHandshake};
 use crossterm::event::KeyCode;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
+use openssl::sign::Signer;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -99,6 +101,15 @@ impl<'a> App<'a> {
         self.draw();
     }
 
+    pub fn network_init(&mut self) {
+        let pem = self
+            .pkey
+            .public_key_to_pem()
+            .expect("failed to encode public key as PEM");
+
+        self.queue_packet(ServerboundHandshake { public_key: pem });
+    }
+
     pub fn draw(&mut self) {
         let history_paragraph = Paragraph::new(self.history.join("\n"));
 
@@ -122,7 +133,16 @@ impl<'a> App<'a> {
     }
 
     fn send_message(&self, message: String) {
-        self.queue_packet(MessagePacket { content: message })
+        let mut signer = Signer::new(MessageDigest::sha256(), &self.pkey)
+            .expect("failed to create message signer");
+
+        signer.update(message.as_bytes());
+        let signature = signer.sign_to_vec().expect("failed to sign message");
+
+        self.queue_packet(MessagePacket {
+            content: message,
+            signature,
+        });
     }
 
     fn queue_packet<P: Packet>(&self, packet: P) {
@@ -156,6 +176,7 @@ async fn main() {
         app.inbound_message_send.clone(),
     ));
 
+    app.network_init();
     app.terminal.clear().unwrap();
     app.draw();
 
