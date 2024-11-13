@@ -2,6 +2,8 @@ use common::{MessagePacket, Packet};
 use crossterm::event::KeyCode;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use openssl::pkey::PKey;
+use openssl::rsa::Rsa;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -23,12 +25,16 @@ struct App<'a> {
     should_exit: bool,
     input: TextArea<'a>,
     history: Vec<String>,
+
+    pkey: PKey<openssl::pkey::Private>,
 }
 
 impl<'a> App<'a> {
     pub fn new(outbound_message_send: mpsc::Sender<String>) -> App<'a> {
         let (keyboard_send, keyboard_recv) = mpsc::channel(16);
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
+
+        let rsa = Rsa::generate(2048).expect("failed to generate RSA key");
 
         App {
             terminal: ratatui::init(),
@@ -40,6 +46,8 @@ impl<'a> App<'a> {
             should_exit: false,
             input: Self::create_input_textarea(),
             history: Vec::new(),
+
+            pkey: PKey::from_rsa(rsa).expect("failed to convert RSA to PKey"),
         }
     }
 

@@ -226,6 +226,7 @@ dependencies = [
  "crossterm",
  "ewebsock",
  "futures-util",
+ "openssl",
  "ratatui",
  "serde_json",
  "tokio",
