@@ -11,6 +11,7 @@ type Socket = WebSocketStream<TcpStream>;
 
 pub struct Connection {
     outbound_msg_send: mpsc::Sender<String>,
+    public_key: Option<Vec<u8>>,
 }
 
 impl Connection {
@@ -27,6 +28,7 @@ impl Connection {
 
         Connection {
             outbound_msg_send: outbound_send,
+            public_key: None,
         }
     }
 
@@ -66,5 +68,9 @@ impl Connection {
         }
 
         Ok(())
+    }
+
+    pub fn public_key(&self) -> &Option<Vec<u8>> {
+        &self.public_key
     }
 }

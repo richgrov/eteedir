@@ -8,6 +8,7 @@ use std::error::Error;
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 pub struct Message {
     pub content: String,
+    pub public_key: Vec<u8>,
 }
 
 pub struct Cassandra {
@@ -55,7 +56,7 @@ impl Cassandra {
     pub async fn read_messages(&self) -> Result<Vec<Message>, Box<dyn Error>> {
         let messages = self
             .session
-            .query_iter("SELECT message FROM eteedir.messages", &[])
+            .query_iter("SELECT message, public_key FROM eteedir.messages", &[])
             .await?
             .into_typed::<Message>();
 

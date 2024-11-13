@@ -98,9 +98,18 @@ impl Server {
         );
     }
 
-    async fn handle_message(&self, _conn: &Arc<Connection>, message: MessagePacket) {
+    async fn handle_message(&self, conn: &Arc<Connection>, message: MessagePacket) {
+        let public_key = match conn.public_key() {
+            Some(k) => k,
+            None => {
+                eprintln!("tried to send a message without sending its public key");
+                return;
+            }
+        };
+
         let db_msg = cassandra::Message {
             content: message.content.clone(),
+            public_key: public_key.to_vec(),
         };
 
         self.dal.insert_message(&db_msg).await.unwrap();
