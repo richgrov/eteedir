@@ -1,3 +1,4 @@
+use common::{MessagePacket, Packet};
 use crossterm::event::KeyCode;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -53,7 +54,7 @@ impl<'a> App<'a> {
                 KeyCode::Enter => {
                     let msg = self.input.lines()[0].clone();
                     self.input = Self::create_input_textarea();
-                    self.outbound_message_send.try_send(msg).unwrap();
+                    self.send_message(msg);
                 }
 
                 _ => {
@@ -63,6 +64,30 @@ impl<'a> App<'a> {
             }
         }
 
+        self.draw();
+    }
+
+    pub fn packet_received(&mut self, raw_data: String) {
+        let (id, json_data) = common::network_decode(&raw_data).unwrap();
+
+        macro_rules! parse_packets {
+            ($($packet_type:ident => $func:ident),* $(,)?) => {
+                match id {
+                $(
+                    $packet_type::ID => self.$func(serde_json::from_str(json_data).unwrap()),
+                )*
+                    other => eprintln!("unexpected packet ID {}", other),
+                }
+            }
+        }
+
+        parse_packets!(
+            MessagePacket => handle_message,
+        );
+    }
+
+    fn handle_message(&mut self, message: MessagePacket) {
+        self.history.push(message.content);
         self.draw();
     }
 
@@ -86,6 +111,16 @@ impl<'a> App<'a> {
         textarea.set_placeholder_text("Type a message...");
         textarea.set_block(Block::default().borders(Borders::ALL));
         textarea
+    }
+
+    fn send_message(&self, message: String) {
+        self.queue_packet(MessagePacket { content: message })
+    }
+
+    fn queue_packet<P: Packet>(&self, packet: P) {
+        self.outbound_message_send
+            .try_send(packet.network_encode())
+            .unwrap();
     }
 }
 
@@ -125,8 +160,7 @@ async fn main() {
             },
             msg_recv = app.inbound_message_recv.recv() => {
                 if let Some(m) = msg_recv {
-                    app.history.push(m);
-                    app.draw();
+                    app.packet_received(m)
                 }
             }
         }

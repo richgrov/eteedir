@@ -2,6 +2,7 @@ mod cassandra;
 mod connection;
 
 use cassandra::Cassandra;
+use common::{MessagePacket, Packet};
 use connection::Connection;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -37,7 +38,11 @@ impl Server {
                 let history = cloned_self.dal.read_messages().await.unwrap();
 
                 for item in history {
-                    connection.queue_message(item).await;
+                    connection
+                        .queue_packet(MessagePacket {
+                            content: item.content,
+                        })
+                        .await;
                 }
             });
         }
@@ -46,23 +51,62 @@ impl Server {
     pub async fn run(self: &Arc<Server>) {
         let mut inbound_msg_recv = self.inbound_msg_recv.lock().await;
         while let Some((address, message)) = inbound_msg_recv.recv().await {
-            self.message_received(address, message).await;
+            self.packet_received(address, message).await;
         }
     }
 
-    pub async fn message_received(
+    pub async fn packet_received(
         self: &Arc<Server>,
-        _client_address: SocketAddr,
+        client_address: SocketAddr,
         message: tokio_tungstenite::tungstenite::Message,
     ) {
-        let eteedir_msg = cassandra::Message {
-            content: message.into_text().unwrap(),
+        let read_map = self.map.read().await;
+        let sender = match read_map.get(&client_address) {
+            Some(client) => client,
+            None => {
+                eprintln!(
+                    "got message from client {} that isn't in client list",
+                    client_address
+                );
+                return;
+            }
         };
 
-        self.dal.insert_message(&eteedir_msg).await.unwrap();
+        let raw_text = match message {
+            tokio_tungstenite::tungstenite::Message::Text(text) => text,
+            other => {
+                eprintln!("unacceptable client message: {}", other);
+                return;
+            }
+        };
+
+        let (id, json_data) = common::network_decode(&raw_text).unwrap();
+
+        macro_rules! parse_packets {
+            ($($packet_type:ident => $func:ident),* $(,)?) => {
+                match id {
+                $(
+                    $packet_type::ID => self.$func(&sender, serde_json::from_str(json_data).unwrap()).await,
+                )*
+                    other => eprintln!("unexpected packet ID {}", other),
+                }
+            }
+        }
+
+        parse_packets!(
+            MessagePacket => handle_message,
+        );
+    }
+
+    async fn handle_message(&self, _conn: &Arc<Connection>, message: MessagePacket) {
+        let db_msg = cassandra::Message {
+            content: message.content.clone(),
+        };
+
+        self.dal.insert_message(&db_msg).await.unwrap();
 
         for client in self.map.read().await.values() {
-            client.queue_message(eteedir_msg.clone()).await;
+            client.queue_packet(message.clone()).await;
         }
     }
 }
