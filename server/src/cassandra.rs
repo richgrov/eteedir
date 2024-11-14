@@ -8,7 +8,7 @@ use std::error::Error;
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 pub struct Message {
     pub content: String,
-    pub public_key: Vec<u8>,
+    pub signature: Vec<u8>,
 }
 
 pub struct Cassandra {
@@ -28,8 +28,8 @@ impl Cassandra {
         let id = rand::thread_rng().gen::<i64>();
         self.session
             .query_unpaged(
-                "INSERT INTO eteedir.messages (id, message, timestamp) VALUES(?, ?, ToTimeStamp(NOW())) IF NOT EXISTS",
-                (id, message.content.clone()),
+                "INSERT INTO eteedir.messages (id, message, signature, timestamp) VALUES(?, ?, ?, ToTimeStamp(NOW())) IF NOT EXISTS",
+                (id, message.content.clone(), message.signature.clone()),
             )
             .await?;
 
@@ -56,7 +56,7 @@ impl Cassandra {
     pub async fn read_messages(&self) -> Result<Vec<Message>, Box<dyn Error>> {
         let messages = self
             .session
-            .query_iter("SELECT message, public_key FROM eteedir.messages", &[])
+            .query_iter("SELECT message, signature FROM eteedir.messages", &[])
             .await?
             .into_typed::<Message>();
 

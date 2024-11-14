@@ -138,7 +138,10 @@ impl<'a> App<'a> {
         let mut signer = Signer::new(MessageDigest::sha256(), &self.pkey)
             .expect("failed to create message signer");
 
-        signer.update(message.as_bytes());
+        signer
+            .update(message.as_bytes())
+            .expect("failed to update signer");
+
         let signature = signer.sign_to_vec().expect("failed to sign message");
 
         self.queue_packet(MessagePacket {
