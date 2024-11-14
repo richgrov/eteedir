@@ -1,17 +1,16 @@
 use std::net::SocketAddr;
 
+use common::Packet;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 
-use crate::cassandra;
-
 type Socket = WebSocketStream<TcpStream>;
 
 pub struct Connection {
-    outbound_msg_send: mpsc::Sender<cassandra::Message>,
+    outbound_msg_send: mpsc::Sender<String>,
 }
 
 impl Connection {
@@ -31,8 +30,8 @@ impl Connection {
         }
     }
 
-    pub async fn queue_message(&self, message: cassandra::Message) {
-        let _ = self.outbound_msg_send.send(message).await;
+    pub async fn queue_packet<P: Packet>(&self, packet: P) {
+        let _ = self.outbound_msg_send.send(packet.network_encode()).await;
     }
 
     pub async fn read_loop(
@@ -59,10 +58,10 @@ impl Connection {
 
     pub async fn write_loop(
         mut write: SplitSink<Socket, tokio_tungstenite::tungstenite::Message>,
-        mut outbound_messages: mpsc::Receiver<cassandra::Message>,
+        mut outbound_messages: mpsc::Receiver<String>,
     ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
-        while let Some(msg) = outbound_messages.recv().await {
-            let ws_message = tokio_tungstenite::tungstenite::Message::Text(msg.content);
+        while let Some(encoded_packet) = outbound_messages.recv().await {
+            let ws_message = tokio_tungstenite::tungstenite::Message::Text(encoded_packet);
             write.send(ws_message).await?;
         }
 

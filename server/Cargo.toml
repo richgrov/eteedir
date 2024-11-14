@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+common = { path = "../common" }
 mongodb = "2.1"
 bson = { version = "2", features = ["chrono-0_4"] } # Needed for using chrono datetime in doc
 tokio = "1"
@@ -15,3 +16,4 @@ futures-util = "0.3.31"
 dotenvy = "0.15.7"
 scylla = "0.14.0"
 uuid = "1.11.0"
+serde_json = "1.0.132"
