@@ -1,11 +1,11 @@
 use futures::TryStreamExt;
 use rand::Rng;
 use scylla::batch::Batch;
-use scylla::{Session, SessionBuilder};
+use scylla::{FromRow, Session, SessionBuilder};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 pub struct Message {
     pub content: String,
 }
@@ -53,70 +53,58 @@ impl Cassandra {
     }
 
     pub async fn read_messages(&self) -> Result<Vec<Message>, Box<dyn Error>> {
-        let mut messages = self
+        let messages = self
             .session
             .query_iter("SELECT message FROM eteedir.messages", &[])
             .await?
-            .into_typed::<(String,)>();
+            .into_typed::<Message>();
 
-        let mut vec = Vec::new();
-        while let Some((message,)) = messages.try_next().await? {
-            vec.push(Message { content: message });
-        }
+        let vec: Vec<Message> = messages.try_collect().await?;
 
         Ok(vec)
     }
 
     // LIMIT
     pub async fn read_n_messages(&self, limit: i32) -> Result<Vec<Message>, Box<dyn Error>> {
-        let mut messages = self
+        let messages = self
             .session
             .query_iter("SELECT message FROM eteedir.messages LIMIT ?", (limit,))
             .await?
-            .into_typed::<(String,)>();
+            .into_typed::<Message>();
 
-        let mut vec = Vec::new();
-        while let Some((message,)) = messages.try_next().await? {
-            vec.push(Message { content: message });
-        }
+        let vec: Vec<Message> = messages.try_collect().await?;
 
         Ok(vec)
     }
 
     // ORDER BY
     pub async fn read_by_order(&self, id: i64) -> Result<Vec<Message>, Box<dyn Error>> {
-        let mut messages = self
+        let messages = self
             .session
             .query_iter(
                 "SELECT message FROM eteedir.messages WHERE id = (?) ORDER BY timestamp",
                 (id,),
             )
             .await?
-            .into_typed::<(String,)>();
+            .into_typed::<Message>();
 
-        let mut vec = Vec::new();
-        while let Some((message,)) = messages.try_next().await? {
-            vec.push(Message { content: message });
-        }
+        let vec: Vec<Message> = messages.try_collect().await?;
 
         Ok(vec)
     }
 
     // IN
     pub async fn read_by_in(&self, id1: i64, id2: i64) -> Result<Vec<Message>, Box<dyn Error>> {
-        let mut messages = self
+        let messages = self
             .session
             .query_iter(
                 "SELECT message FROM eteedir.messages WHERE id in (?, ?)",
                 (id1, id2),
             )
             .await?
-            .into_typed::<(String,)>();
+            .into_typed::<Message>();
 
-        let mut vec = Vec::new();
-        while let Some((message,)) = messages.try_next().await? {
-            vec.push(Message { content: message });
-        }
+        let vec: Vec<Message> = messages.try_collect().await?;
 
         Ok(vec)
     }
