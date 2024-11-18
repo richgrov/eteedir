@@ -1,7 +1,7 @@
 use common::{MessagePacket, Packet, ServerboundHandshake};
-use crossterm::event::KeyCode;
+use crossterm::event::{EventStream, KeyCode};
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
@@ -9,7 +9,6 @@ use openssl::sign::Signer;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::{text::Text, Frame};
 use std::io::Error;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -19,8 +18,6 @@ use tui_textarea::TextArea;
 
 struct App<'a> {
     terminal: ratatui::Terminal<CrosstermBackend<std::io::Stdout>>,
-    keyboard_send: mpsc::Sender<crossterm::event::Event>,
-    keyboard_recv: mpsc::Receiver<crossterm::event::Event>,
     inbound_message_send: mpsc::Sender<String>,
     inbound_message_recv: mpsc::Receiver<String>,
     outbound_message_send: mpsc::Sender<String>,
@@ -33,15 +30,12 @@ struct App<'a> {
 
 impl<'a> App<'a> {
     pub fn new(outbound_message_send: mpsc::Sender<String>) -> App<'a> {
-        let (keyboard_send, keyboard_recv) = mpsc::channel(16);
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
 
         let rsa = Rsa::generate(2048).expect("failed to generate RSA key");
 
         App {
             terminal: ratatui::init(),
-            keyboard_send,
-            keyboard_recv,
             inbound_message_send: message_send,
             inbound_message_recv: message_recv,
             outbound_message_send,
@@ -173,8 +167,8 @@ async fn main() {
 
     let (write, reader) = socket.split();
     let (outbound_msg_send, outbound_msg_recv) = mpsc::channel(8);
+    let mut event_stream = EventStream::new();
     let mut app = App::new(outbound_msg_send);
-    tokio::spawn(read_console_input(app.keyboard_send.clone()));
     tokio::spawn(send_to_server(write, outbound_msg_recv));
     tokio::spawn(receive_from_server(
         reader,
@@ -186,9 +180,11 @@ async fn main() {
     app.draw();
 
     while !app.should_exit {
+        let ct_event = event_stream.next().fuse();
+
         tokio::select! {
-            maybe_event = app.keyboard_recv.recv() => {
-                if let Some(event) = maybe_event {
+            maybe_event = ct_event => {
+                if let Some(Ok(event)) = maybe_event {
                     app.on_key_press(event);
                 }
             },
@@ -201,16 +197,6 @@ async fn main() {
     }
     ratatui::restore();
     panic!();
-}
-
-async fn read_console_input(sending_channel: mpsc::Sender<crossterm::event::Event>) {
-    loop {
-        let event = crossterm::event::read().expect("kjsahfkjsahfkjadsf");
-
-        if sending_channel.send(event).await.is_err() {
-            break;
-        }
-    }
 }
 
 async fn send_to_server(
