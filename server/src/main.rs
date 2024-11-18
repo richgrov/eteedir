@@ -2,8 +2,10 @@ mod cassandra;
 mod connection;
 
 use cassandra::Cassandra;
-use common::{MessagePacket, Packet};
+use common::{MessagePacket, Packet, ServerboundHandshake};
 use connection::Connection;
+use openssl::hash::MessageDigest;
+use openssl::sign::{Signer, Verifier};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -41,6 +43,7 @@ impl Server {
                     connection
                         .queue_packet(MessagePacket {
                             content: item.content,
+                            signature: item.signature,
                         })
                         .await;
                 }
@@ -95,18 +98,43 @@ impl Server {
 
         parse_packets!(
             MessagePacket => handle_message,
+            ServerboundHandshake => handle_serverbound_handshake,
         );
     }
 
-    async fn handle_message(&self, _conn: &Arc<Connection>, message: MessagePacket) {
+    async fn handle_message(&self, conn: &Arc<Connection>, message: MessagePacket) {
+        if !conn.has_public_key().await {
+            eprintln!("tried to send a message without sending its public key");
+            return;
+        }
+
+        if !conn
+            .verify_signature(message.content.as_bytes(), &message.signature)
+            .await
+        {
+            eprintln!("message signature mismatch");
+            return;
+        }
+
         let db_msg = cassandra::Message {
             content: message.content.clone(),
+            signature: message.signature.clone(),
         };
 
         self.dal.insert_message(&db_msg).await.unwrap();
 
         for client in self.map.read().await.values() {
             client.queue_packet(message.clone()).await;
+        }
+    }
+
+    async fn handle_serverbound_handshake(
+        &self,
+        sender: &Arc<Connection>,
+        handshake: ServerboundHandshake,
+    ) {
+        if let Err(e) = sender.set_public_key(handshake.public_key.as_bytes()).await {
+            eprintln!("invalid public key: {}", e);
         }
     }
 }

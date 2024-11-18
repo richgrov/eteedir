@@ -1,7 +1,11 @@
-use common::{MessagePacket, Packet};
+use common::{MessagePacket, Packet, ServerboundHandshake};
 use crossterm::event::KeyCode;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use openssl::hash::MessageDigest;
+use openssl::pkey::PKey;
+use openssl::rsa::Rsa;
+use openssl::sign::Signer;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -23,12 +27,16 @@ struct App<'a> {
     should_exit: bool,
     input: TextArea<'a>,
     history: Vec<String>,
+
+    pkey: PKey<openssl::pkey::Private>,
 }
 
 impl<'a> App<'a> {
     pub fn new(outbound_message_send: mpsc::Sender<String>) -> App<'a> {
         let (keyboard_send, keyboard_recv) = mpsc::channel(16);
         let (message_send, message_recv) = tokio::sync::mpsc::channel(16);
+
+        let rsa = Rsa::generate(2048).expect("failed to generate RSA key");
 
         App {
             terminal: ratatui::init(),
@@ -40,6 +48,8 @@ impl<'a> App<'a> {
             should_exit: false,
             input: Self::create_input_textarea(),
             history: Vec::new(),
+
+            pkey: PKey::from_rsa(rsa).expect("failed to convert RSA to PKey"),
         }
     }
 
@@ -91,6 +101,17 @@ impl<'a> App<'a> {
         self.draw();
     }
 
+    pub fn network_init(&mut self) {
+        let pem = self
+            .pkey
+            .public_key_to_pem()
+            .expect("failed to encode public key as PEM");
+
+        self.queue_packet(ServerboundHandshake {
+            public_key: String::from_utf8(pem).unwrap(),
+        });
+    }
+
     pub fn draw(&mut self) {
         let history_paragraph = Paragraph::new(self.history.join("\n"));
 
@@ -114,7 +135,19 @@ impl<'a> App<'a> {
     }
 
     fn send_message(&self, message: String) {
-        self.queue_packet(MessagePacket { content: message })
+        let mut signer = Signer::new(MessageDigest::sha256(), &self.pkey)
+            .expect("failed to create message signer");
+
+        signer
+            .update(message.as_bytes())
+            .expect("failed to update signer");
+
+        let signature = signer.sign_to_vec().expect("failed to sign message");
+
+        self.queue_packet(MessagePacket {
+            content: message,
+            signature,
+        });
     }
 
     fn queue_packet<P: Packet>(&self, packet: P) {
@@ -148,6 +181,7 @@ async fn main() {
         app.inbound_message_send.clone(),
     ));
 
+    app.network_init();
     app.terminal.clear().unwrap();
     app.draw();
 

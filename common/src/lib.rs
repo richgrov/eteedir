@@ -1,6 +1,9 @@
 use std::io::ErrorKind;
 
-use serde::{Deserialize, Serialize};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use serde::de::Unexpected;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub trait Packet: Serialize {
     const ID: &'static str;
@@ -14,6 +17,33 @@ pub trait Packet: Serialize {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MessagePacket {
     pub content: String,
+    #[serde(
+        serialize_with = "serialize_as_base64",
+        deserialize_with = "deserialize_from_base64"
+    )]
+    pub signature: Vec<u8>,
+}
+
+fn serialize_as_base64<S>(val: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let encoded = BASE64_STANDARD.encode(val);
+    serializer.serialize_str(&encoded)
+}
+
+fn deserialize_from_base64<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    let bytes = BASE64_STANDARD
+        .decode(&s)
+        .map_err(serde::de::Error::custom)?;
+
+    bytes.as_slice()[..256].try_into().map_err(|_| {
+        serde::de::Error::invalid_value(Unexpected::Str(&s), &"256-byte base64 string")
+    })
 }
 
 impl Packet for MessagePacket {
@@ -34,4 +64,13 @@ pub fn network_decode<'a>(raw: &'a str) -> Result<(&'a str, &'a str), std::io::E
     };
 
     Ok((id, json_data))
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ServerboundHandshake {
+    pub public_key: String,
+}
+
+impl Packet for ServerboundHandshake {
+    const ID: &'static str = "serverbound_handshake";
 }
